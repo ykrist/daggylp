@@ -1,0 +1,8 @@
+[package]
+authors = ["Me <Me>"]
+edition = "2018"
+name = "daggylp"
+version = "0.1.0"
+
+[dependencies]
+fnv = "*"
