@@ -1,10 +1,10 @@
 mod graph;
-mod edges;
+mod path_iis;
+mod cycles;
+mod mrs;
+mod viz;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+
+pub(crate) fn set_with_capacity<K>(n: usize) -> fnv::FnvHashSet<K> {
+  fnv::FnvHashSet::with_capacity_and_hasher(n, Default::default())
 }

@@ -5,4 +5,5 @@ name = "daggylp"
 version = "0.1.0"
 
 [dependencies]
+dot = "0.1.4"
 fnv = "*"
