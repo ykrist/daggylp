@@ -7,3 +7,11 @@ version = "0.1.0"
 [dependencies]
 dot = "0.1.4"
 fnv = "*"
+rand = { version = "0.8.3", features = ["small_rng"]}
+
+[dev-dependencies]
+test-case = "1.1.0"
+
+[[bin]]
+name = "generate-test-cases"
+path = "src/bin/generate-test-cases.rs"

@@ -1,8 +1,10 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use fnv::{FnvHashSet, FnvHashMap};
 use std::hash::Hash;
-use crate::graph::EdgeKind::{SccOut, SccIn};
+use crate::graph::EdgeKind::{SccOut, SccIn, SccToScc};
 use crate::set_with_capacity;
+use std::cmp::min;
+use std::option::Option::Some;
 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,23 +56,38 @@ impl Iis {
     Iis{ constrs }
   }
 
+  /// Path should be in order
+  pub(crate) fn from_path(vars: impl IntoIterator<Item=Var>) -> Self {
+    let mut vars = vars.into_iter();
+    let mut constrs = set_with_capacity(vars.size_hint().0 + 1);
+    let mut i : Var = vars.next().unwrap();
+    constrs.insert(Constraint::Lb(i));
+    for j in vars {
+      constrs.insert(Constraint::Edge(i, j));
+      i = j;
+    }
+    constrs.insert(Constraint::Ub(i));
+    Iis{ constrs }
+  }
+
+
   pub(crate) fn add_constraint(&mut self, c: Constraint) {
     let unique = self.constrs.insert(c);
     debug_assert!(unique)
   }
 
-  pub fn size(&self) -> usize { self.constrs.len() }
+  pub fn len(&self) -> usize { self.constrs.len() }
 }
 
 pub type Weight = u64;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum InfKind {
   Cycle,
   Path,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SolveStatus {
   Infeasible(InfKind),
   Optimal,
@@ -78,11 +95,11 @@ pub enum SolveStatus {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ModelState {
-  Init,
-  Cycles,
-  CycleInfeasible { sccs: Vec<FnvHashSet<usize>>, first_inf_scc: usize },
+  Unsolved,
+  InfCycle { sccs: Vec<FnvHashSet<usize>>, first_inf_scc: usize },
   InfPath(Vec<usize>),
   Optimal,
+  Mrs
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -90,6 +107,7 @@ pub enum EdgeKind {
   Regular,
   SccIn(usize),
   SccOut(usize),
+  SccToScc{ from: usize, to: usize }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -115,6 +133,7 @@ pub struct Var {
   node: usize,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum NodeKind {
   /// Regular node
   Var,
@@ -126,16 +145,21 @@ pub enum NodeKind {
 
 impl NodeKind {
   // Should this node kind be ignored during forward-labelling
-  fn ignored_fwd_label(&self) -> bool {
-    matches!(self, NodeKind::SccMember(_))
+  pub(crate) fn ignored_fwd_label(&self) -> bool {
+    self.is_scc_member()
   }
 
   // Should this node kind be ignored during back-labelling of an acyclic IIS?
-  fn ignored_iis_back_label(&self) -> bool {
-    matches!(self, NodeKind::Scc(_))
+  pub(crate) fn ignored_iis_back_label(&self) -> bool {
+    self.is_scc()
   }
+
+  pub(crate) fn is_scc_member(&self) -> bool { matches!(self, NodeKind::SccMember(_))}
+
+  pub(crate) fn is_scc(&self) -> bool { matches!(self, NodeKind::Scc(_))}
 }
 
+#[derive(Debug, Clone)]
 pub struct Node {
   pub(crate) x: Weight,
   pub(crate) obj: Weight,
@@ -145,6 +169,7 @@ pub struct Node {
   pub(crate) kind: NodeKind,
 }
 
+#[derive(Debug)]
 pub struct SccInfo {
   pub(crate) nodes: FnvHashSet<usize>,
   pub(crate) lb_node: usize,
@@ -227,7 +252,7 @@ impl Graph {
       edges_to: Vec::with_capacity(params.size_hint_constrs),
       source_nodes: Vec::new(),
       parameters: params,
-      state: ModelState::Init,
+      state: ModelState::Unsolved,
     }
   }
 
@@ -284,61 +309,72 @@ impl Graph {
 
   pub fn solve(&mut self) -> SolveStatus {
     // FIXME check state?
-    self.state = self.forward_label();
-    match &self.state {
-      ModelState::Cycles => {
-        let sccs = self.find_sccs();
-        let inf_idx = sccs.iter().enumerate()
-          .find(|(_, scc)| !self.scc_is_feasible(scc))
-          .map(|(idx, _)| idx);
+    if let Some(state) = self.forward_label() {
+      self.state = state;
+    } else {
+      let sccs = self.find_sccs();
+      dbg!(&sccs);
+      let inf_idx = sccs.iter().enumerate()
+        .find(|(_, scc)| !self.scc_is_feasible(scc))
+        .map(|(idx, _)| idx);
 
-        if let Some(inf_idx) = inf_idx {
-          self.state = ModelState::CycleInfeasible { sccs, first_inf_scc: inf_idx };
-          SolveStatus::Infeasible(InfKind::Cycle)
-        } else {
-          self.condense(sccs);
-          self.solve()
-        }
-      }
-      ModelState::CycleInfeasible { .. } => SolveStatus::Infeasible(InfKind::Cycle),
+      self.state = if let Some(inf_idx) = inf_idx {
+        ModelState::InfCycle { sccs, first_inf_scc: inf_idx }
+      } else {
+        self.condense(sccs);
+        self.forward_label().expect("second forward labelling should not find cycles")
+      };
+    }
+    match &self.state {
+      ModelState::InfCycle { .. } => SolveStatus::Infeasible(InfKind::Cycle),
       ModelState::InfPath(_) => SolveStatus::Infeasible(InfKind::Path),
       ModelState::Optimal => SolveStatus::Optimal,
-      ModelState::Init => unreachable!(),
+      ModelState::Unsolved | ModelState::Mrs => unreachable!(),
     }
-
   }
 
   pub(crate) fn edge_to_constraint(&self, e: &Edge) -> Constraint {
     Constraint::Edge(self.var_from_node_id(e.from), self.var_from_node_id(e.to))
   }
 
-  fn forward_label(&mut self) -> ModelState {
-    let mut num_active_nodes = 0;
-    let mut num_visited_nodes = 0;
-    let mut stack = vec![];
+  fn forward_label(&mut self) -> Option<ModelState> {
+    let mut queue = vec![];
     let mut violated_ubs = vec![];
-    let mut num_visited_pred = vec![0; self.nodes.len()];
-    // Preprocessing - find source nodes and count number of active nodes
-    for (n, node) in self.nodes.iter().enumerate() {
-      if self.edges_to[n].is_empty() {
-        stack.push(n);
+    let mut num_unvisited_pred = vec![0u64; self.nodes.len()];
+
+    // Preprocessing - find source nodes and count number of edges
+    for (n, node) in self.nodes.iter().enumerate() { // FIXME reset node here
+      if node.kind.is_scc_member() {
+        continue
       }
-      if !node.kind.ignored_fwd_label() {
-        num_active_nodes += 1;
+      for e in &self.edges_from[n] {
+        if !self.nodes[e.to].kind.is_scc_member() {
+          num_unvisited_pred[e.to] += 1;
+        }
       }
     }
-    let num_active_nodes = num_active_nodes;
+
+    for (n, node) in self.nodes.iter_mut().enumerate() {
+      node.active_pred = None;
+      node.x = node.lb;
+
+      if node.kind.is_scc_member() {
+        continue
+      }
+      if num_unvisited_pred[n] == 0 {
+        queue.push(n);
+      }
+    }
+
 
     // Solve - traverse DAG in topologically-sorted order
-    while let Some(i) = stack.pop() {
+    while let Some(i) = queue.pop() {
       let node = &self.nodes[i];
-      num_visited_nodes += 1;
-
       let x = node.x;
       for e in &self.edges_from[i] {
         let nxt_node = &mut self.nodes[e.to];
-        if nxt_node.kind.ignored_fwd_label() {
-          continue; // skip this one
+        if nxt_node.kind.is_scc_member() {
+          continue;
         }
         let nxt_x = x + e.weight;
         if nxt_node.x < nxt_x {
@@ -348,27 +384,91 @@ impl Graph {
             violated_ubs.push(e.to);
           }
         }
-        num_visited_pred[e.to] += 1;
-        if num_visited_pred[e.to] == self.edges_to[e.to].len() {
-          stack.push(e.to)
+        num_unvisited_pred[e.to] -= 1;
+        if num_unvisited_pred[e.to] == 0 {
+          queue.push(e.to)
         }
       }
     }
 
     // Post-processing: check infeasibility kinds
-    if num_visited_nodes < num_active_nodes {
-      ModelState::Cycles
+    if num_unvisited_pred.iter().any(|&cnt| cnt != 0) {
+      None
     } else if !violated_ubs.is_empty() {
-      ModelState::InfPath(violated_ubs)
+      Some(ModelState::InfPath(violated_ubs))
     } else {
-      ModelState::Optimal
+      Some(ModelState::Optimal)
     }
   }
 
   /// Find all Strongly-Connected Components with 2 or more nodes
   pub(crate) fn find_sccs(&mut self) -> Vec<FnvHashSet<usize>> {
     debug_assert_eq!(self.sccs.len(), 0);
-    todo!()
+    const UNDEF: usize = usize::MAX;
+
+    #[derive(Copy, Clone)]
+    struct NodeAttr {
+      lowlink: usize,
+      index: usize,
+      onstack: bool,
+    }
+
+
+    fn tarjan(sccs: &mut Vec<FnvHashSet<usize>>, edges_from: &[Vec<Edge>], stack: &mut Vec<usize>, attr: &mut [NodeAttr], v: usize, next_idx: &mut usize) {
+      let node_attr = &mut attr[v];
+      node_attr.index = *next_idx;
+      node_attr.lowlink = *next_idx;
+      node_attr.onstack = true;
+      stack.push(v);
+      *next_idx += 1;
+
+      for w in edges_from[v].iter().map(|e| e.to) {
+        let w_attr = &attr[w];
+        if w_attr.index == UNDEF {
+          tarjan(sccs, edges_from, stack, attr, w, next_idx);
+          let w_lowlink = attr[w].lowlink;
+          let v_attr = &mut attr[v];
+          v_attr.lowlink = min(v_attr.lowlink, w_lowlink);
+        } else if w_attr.onstack {
+          let w_index = w_attr.index;
+          let v_attr = &mut attr[v];
+          v_attr.lowlink = min(v_attr.lowlink, w_index);
+        }
+      }
+
+      let v_attr = &mut attr[v];
+      if v_attr.lowlink == v_attr.index {
+        let w = stack.pop().unwrap();
+        attr[w].onstack = false;
+
+        if w != v { // ignore trivial SCCs of size 1
+          let mut scc = set_with_capacity(16);
+          scc.insert(w);
+          loop {
+            let w = stack.pop().unwrap();
+            attr[w].onstack = false;
+            scc.insert(w);
+            if w == v {
+              break;
+            }
+          }
+          sccs.push(scc);
+        }
+      }
+    }
+
+    let mut attr = vec![NodeAttr{ lowlink: UNDEF, index: UNDEF, onstack: false }; self.nodes.len()];
+    let mut next_idx = 0;
+    let mut stack = Vec::with_capacity(32);
+    let mut sccs = Vec::new();
+
+    for n in 0..self.nodes.len() {
+      if attr[n].index == UNDEF {
+        tarjan(&mut sccs, &self.edges_from, &mut stack, &mut attr, n, &mut next_idx);
+      }
+    }
+    dbg!(&sccs);
+    sccs
   }
 
   pub(crate) fn scc_is_feasible(&self, scc: &FnvHashSet<usize>) -> bool {
@@ -384,56 +484,28 @@ impl Graph {
   }
 
   pub(crate) fn condense(&mut self, sccs: Vec<FnvHashSet<usize>>) {
+    // Add new SCC nodes
     for scc in sccs {
       let (lb_node, lb) = scc.iter().map(|&n| (n, self.nodes[n].lb))
         .max_by_key(|pair| pair.1).unwrap();
       let (ub_node, ub) = scc.iter().map(|&n| (n, self.nodes[n].ub))
         .min_by_key(|pair| pair.1).unwrap();
 
-      let scc_n = self.sccs.len();
+      let scc_idx = self.sccs.len();
+      let scc_n = self.nodes.len();
       let scc_node = Node {
         x: lb,
         ub,
         lb,
         obj: 0,
-        kind: NodeKind::Scc(scc_n),
+        kind: NodeKind::Scc(scc_idx),
         active_pred: None,
       };
       self.nodes.push(scc_node);
 
-      // edges into the SCC
-      let mut biggest_in = FnvHashMap::<usize, Edge>::default();
-      let mut biggest_out = FnvHashMap::<usize, Edge>::default();
-      for e in self.edges_from.iter().flat_map(|edges| edges.iter()) {
-        if scc.contains(&e.to) && scc.contains(&e.from) {
-          if !biggest_in.contains_key(&e.from) || biggest_in[&e.from].weight < e.weight {
-            biggest_in.insert(e.from, *e);
-          }
-        }
-
-        if scc.contains(&e.from) && scc.contains(&e.to) {
-          if !biggest_out.contains_key(&e.from) || biggest_out[&e.from].weight < e.weight {
-            biggest_out.insert(e.from, *e);
-          }
-        }
-      }
-
-      self.edges_from.push(biggest_out.into_iter()
-        .map(|(_, mut e)| {
-          e.kind = SccOut(e.from);
-          e.from = scc_n;
-          e
-        })
-        .collect());
-
-      for (_, mut e) in biggest_in.into_iter() {
-        e.kind = SccIn(e.to);
-        e.to = scc_n;
-        self.edges_from[e.from].push(e);
-      }
-
       for &n in &scc {
-        self.nodes[n].kind = NodeKind::SccMember(scc_n);
+        dbg!(n, scc_idx);
+        self.nodes[n].kind = NodeKind::SccMember(scc_idx);
       }
 
       self.sccs.push(SccInfo {
@@ -441,7 +513,67 @@ impl Graph {
         scc_node: scc_n,
         lb_node,
         ub_node,
-      })
+      });
+    }
+
+    eprintln!("{:?}", &self.nodes);
+    eprintln!("{:?}", &self.sccs);
+
+    // Add new edges in and out of the SCC
+    let mut new_edges = FnvHashMap::<(usize, usize), Edge>::default();
+    let mut add_edge = |new_edges: &mut FnvHashMap<(usize, usize), Edge>, edge: Edge| {
+      new_edges.entry((edge.from, edge.to))
+        .and_modify(|e| if e.weight < edge.weight { *e = edge })
+        .or_insert(edge);
+    };
+
+    for scc in &self.sccs {
+      for &n in &scc.nodes {
+        for e in &self.edges_to[n] {
+          let mut e = *e;
+          if scc.nodes.contains(&e.from) { continue }
+
+          match self.nodes[e.from].kind {
+            NodeKind::Var => {
+              e.kind = SccIn(e.to);
+            },
+            NodeKind::SccMember(k) => {
+              e.kind = SccToScc { from: e.from, to: e.to };
+              e.from = self.sccs[k].scc_node;
+            },
+            NodeKind::Scc(_) => unreachable!(),
+
+          };
+          e.to = scc.scc_node;
+          add_edge(&mut new_edges, e);
+        }
+
+        for e in &self.edges_from[n] {
+          let mut e = *e;
+          if scc.nodes.contains(&e.to) { continue}
+          match self.nodes[e.to].kind {
+            NodeKind::Var => {
+              e.kind = SccOut(e.from)
+            },
+            NodeKind::SccMember(k) => {
+              e.kind = SccToScc { from: e.from, to: e.to };
+              e.to = self.sccs[k].scc_node;
+            },
+            NodeKind::Scc(_) => unreachable!(),
+          };
+          e.from = scc.scc_node;
+          add_edge(&mut new_edges, e);
+        }
+      }
+    }
+
+    for edge_lookup in &mut [&mut self.edges_from, &mut self.edges_to] {
+      edge_lookup.extend(std::iter::repeat_with(Vec::new).take(self.sccs.len()))
+    }
+
+    for ((from, to), e) in new_edges {
+      self.edges_from[from].push(e);
+      self.edges_to[to].push(e);
     }
   }
 
@@ -450,17 +582,51 @@ impl Graph {
       ModelState::InfPath(violated_ubs) => {
         self.compute_path_iis(violated_ubs)
       },
-      ModelState::CycleInfeasible { sccs, first_inf_scc } => {
+      ModelState::InfCycle { sccs, first_inf_scc } => {
         self.compute_cyclic_iis(&sccs[*first_inf_scc..])
       }
-      ModelState::Optimal => panic!("cannot compute IIS on feasible model"),
-      ModelState::Init => panic!("need to call solve() first"),
-      ModelState::Cycles => unreachable!()
+      ModelState::Optimal | ModelState::Mrs => panic!("cannot compute IIS on feasible model"),
+      ModelState::Unsolved => panic!("need to call solve() first"),
     }
   }
 
   pub(crate) fn find_edge(&self, from: usize, to: usize) -> &Edge {
-    let _ = (from, to);
-    todo!()
+    for e in &self.edges_from[from] {
+      if &e.to == &to {
+        return e
+      }
+    }
+    unreachable!()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::test_utils::*;
+  use crate::viz::*;
+  use test_case::test_case;
+  use SolveStatus::*;
+  use InfKind::*;
+
+  #[test_case("simple-f" => Optimal)]
+  #[test_case("simple-cycle-cei" => Infeasible(Cycle))]
+  #[test_case("simple-cycle-f" => Optimal)]
+  #[test_case("complex-scc-cei" => Infeasible(Cycle))]
+  #[test_case("multiple-sccs-f" => Optimal)]
+  #[test_case("k8-f" => Optimal)]
+  #[test_case("k8-cei" => Infeasible(Cycle))]
+  #[test_case("k8-cbi" => Infeasible(Cycle))]
+  fn solve(input_name: &str) -> SolveStatus {
+    let mut g = GraphGen::load_from_file(test_input(input_name)).build();
+    let status = g.solve();
+    // if draw {
+    g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));
+    status
+  }
+
+  #[test]
+  fn foo() {
+
   }
 }
