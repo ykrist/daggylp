@@ -343,7 +343,7 @@ impl Graph {
     let mut num_unvisited_pred = vec![0u64; self.nodes.len()];
 
     // Preprocessing - find source nodes and count number of edges
-    for (n, node) in self.nodes.iter().enumerate() { // FIXME reset node here
+    for (n, node) in self.nodes.iter().enumerate() {
       if node.kind.is_scc_member() {
         continue
       }
@@ -397,6 +397,14 @@ impl Graph {
     } else if !violated_ubs.is_empty() {
       Some(ModelState::InfPath(violated_ubs))
     } else {
+      // FIXME: move to separate post-processing stage and do lazily
+      for scc in &self.sccs {
+        for &n in &scc.nodes {
+          self.nodes[n].x = self.nodes[scc.scc_node].x;
+        }
+      }
+
+
       Some(ModelState::Optimal)
     }
   }
