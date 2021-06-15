@@ -3,9 +3,11 @@ use fnv::{FnvHashSet, FnvHashMap};
 use std::hash::Hash;
 use crate::graph::EdgeKind::{SccOut, SccIn, SccToScc};
 use crate::set_with_capacity;
+use crate::iis::Iis;
+
 use std::cmp::min;
 use std::option::Option::Some;
-
+use std::iter::ExactSizeIterator;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mrs {
@@ -35,49 +37,6 @@ impl Mrs {
   }
 }
 
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Iis {
-  pub(crate) constrs: FnvHashSet<Constraint>,
-}
-
-impl Iis {
-  /// First variable should **NOT** be the same as the last
-  pub(crate) fn from_cycle(vars: impl IntoIterator<Item=Var>) -> Self {
-    let mut vars = vars.into_iter();
-    let first : Var = vars.next().unwrap();
-    let mut constrs = set_with_capacity(vars.size_hint().0 + 1);
-    let mut i = first;
-    for j in vars {
-      constrs.insert(Constraint::Edge(i, j));
-      i = j;
-    }
-    constrs.insert(Constraint::Edge(i, first));
-    Iis{ constrs }
-  }
-
-  /// Path should be in order
-  pub(crate) fn from_path(vars: impl IntoIterator<Item=Var>) -> Self {
-    let mut vars = vars.into_iter();
-    let mut constrs = set_with_capacity(vars.size_hint().0 + 1);
-    let mut i : Var = vars.next().unwrap();
-    constrs.insert(Constraint::Lb(i));
-    for j in vars {
-      constrs.insert(Constraint::Edge(i, j));
-      i = j;
-    }
-    constrs.insert(Constraint::Ub(i));
-    Iis{ constrs }
-  }
-
-
-  pub(crate) fn add_constraint(&mut self, c: Constraint) {
-    let unique = self.constrs.insert(c);
-    debug_assert!(unique)
-  }
-
-  pub fn len(&self) -> usize { self.constrs.len() }
-}
 
 pub type Weight = u64;
 
@@ -240,6 +199,66 @@ pub struct GraphBuilder {}
 // once it's been finalised, not more adding of edges/nodes.  Only modification allowed is to remove
 // an edge.
 
+pub(crate) enum ForwardDir {}
+pub(crate) enum BackwardDir {}
+
+
+pub(crate) trait EdgeDir {
+  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) -> NeighboursIter<'a, Self>;
+
+  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize>;
+
+  fn is_forwards() -> bool;
+}
+
+pub(crate) struct NeighboursIter<'a, D: ?Sized> {
+  dir: std::marker::PhantomData<D>,
+  edges: std::slice::Iter<'a, Edge>,
+}
+
+impl EdgeDir for ForwardDir {
+  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) ->  NeighboursIter<'a, Self> {
+    NeighboursIter {
+      edges: graph.edges_from[node].iter(),
+      dir: std::marker::PhantomData
+    }
+  }
+
+  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize> {
+    edges.next().map(|e| e.to)
+  }
+
+  fn is_forwards() -> bool { true }
+}
+
+impl EdgeDir for BackwardDir {
+  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) ->  NeighboursIter<'a, Self> {
+    NeighboursIter {
+      edges: graph.edges_to[node].iter(),
+      dir: std::marker::PhantomData
+    }
+  }
+
+  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize> {
+    edges.next().map(|e| e.from)
+  }
+
+  fn is_forwards() -> bool { false }
+}
+
+impl<D: EdgeDir> Iterator for NeighboursIter<'_, D> {
+  type Item = usize;
+  fn next(&mut self) -> Option<Self::Item> {
+    D::next_neigh(&mut self.edges)
+  }
+
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    self.edges.size_hint()
+  }
+}
+
+impl<D: EdgeDir> ExactSizeIterator for NeighboursIter<'_, D>{}
+
 impl Graph {
   pub fn new_with_params(params: Parameters) -> Self {
     static NEXT_ID: AtomicU32 = AtomicU32::new(0);
@@ -255,6 +274,7 @@ impl Graph {
       state: ModelState::Unsolved,
     }
   }
+
 
   pub fn new() -> Self {
     Self::new_with_params(Parameters::default())
@@ -335,6 +355,18 @@ impl Graph {
 
   pub(crate) fn edge_to_constraint(&self, e: &Edge) -> Constraint {
     Constraint::Edge(self.var_from_node_id(e.from), self.var_from_node_id(e.to))
+  }
+
+  pub(crate) fn neighbours<D: EdgeDir>(&self, n: usize) -> NeighboursIter<'_, D> {
+    D::new_neigh_iter(self, n)
+  }
+
+  pub(crate) fn successors(&self, n: usize) -> NeighboursIter<'_, ForwardDir> {
+    ForwardDir::new_neigh_iter(self, n)
+  }
+
+  pub(crate) fn predecessors(&self, n: usize) -> NeighboursIter<'_, BackwardDir> {
+    BackwardDir::new_neigh_iter(self, n)
   }
 
   fn forward_label(&mut self) -> Option<ModelState> {
@@ -582,19 +614,6 @@ impl Graph {
     for ((from, to), e) in new_edges {
       self.edges_from[from].push(e);
       self.edges_to[to].push(e);
-    }
-  }
-
-  pub fn compute_iis(&mut self) -> Iis {
-    match &self.state {
-      ModelState::InfPath(violated_ubs) => {
-        self.compute_path_iis(violated_ubs)
-      },
-      ModelState::InfCycle { sccs, first_inf_scc } => {
-        self.compute_cyclic_iis(&sccs[*first_inf_scc..])
-      }
-      ModelState::Optimal | ModelState::Mrs => panic!("cannot compute IIS on feasible model"),
-      ModelState::Unsolved => panic!("need to call solve() first"),
     }
   }
 

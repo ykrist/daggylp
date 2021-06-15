@@ -1,7 +1,5 @@
 use dot::*;
 use super::graph::*;
-use std::borrow::Cow;
-use std::fmt;
 use std::path::Path;
 use crate::test_utils::GraphGen;
 

@@ -1,7 +1,7 @@
-use super::graph::*;
-use fnv::FnvHashMap;
+use crate::graph::*;
+use super::*;
 use crate::{map_with_capacity};
-
+use fnv::FnvHashMap;
 
 fn update_min<T: Ord, U>(dst: &mut Option<(T, U)>, src: (T, U)) -> bool {
   if let Some(v) = dst {
@@ -104,7 +104,10 @@ impl Graph {
 
     let (path_len, initial_state) = shortest_path_initial_state.unwrap();
     let shortest_path = DpShortestPath::new(&cache, initial_state, path_len);
-    Iis::from_path(shortest_path.map(|n| self.var_from_node_id(n)))
+    let mut iis = Iis::with_capacity(path_len as usize + 1);
+    iis.add_forwards_path(shortest_path.map(|n| self.var_from_node_id(n)), true);
+    debug_assert_eq!(iis.constrs.capacity(), iis.constrs.len());
+    iis
   }
 
   fn dp(&self, cache: &mut DpCache, state: DpState) -> DpValueAction {
@@ -122,7 +125,7 @@ impl Graph {
 
       let mut best_val_action = None;
 
-      for e in &self.edges_to[state.node] {
+      for e in &self.edges_to[state.node] { // FIXME - need to ignore fake SCC nodes here
         let new_state = DpState{ node: e.from, deadline: state.deadline - e.weight };
         let mut val = match self.dp(cache, new_state) {
           Pruned => continue,
@@ -131,7 +134,7 @@ impl Graph {
           Step(val, _) => val,
         };
 
-        val += 1; // add cost from the edge we just traverse
+        val += 1; // add cost from the edge we just traversed
         update_min(&mut best_val_action, (val, new_state));
       }
 
