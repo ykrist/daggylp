@@ -1,6 +1,7 @@
 mod generators;
 mod test_cases;
 mod lp;
+mod strategy;
 
 pub(crate) use generators::*;
 pub use test_cases::generate_test_cases;

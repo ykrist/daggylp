@@ -11,12 +11,12 @@ pub struct NodeData {
 }
 
 #[derive(Debug, Clone)]
-pub struct GraphGen {
+pub struct GraphSpec {
   pub nodes: Vec<NodeData>,
   pub edges: FnvHashMap<(usize, usize), Weight>,
 }
 
-impl GraphGen {
+impl GraphSpec {
   pub fn build(self) -> Graph {
     let mut g = Graph::new();
 
@@ -38,8 +38,18 @@ impl GraphGen {
     n
   }
 
+  pub fn with_node_data(nodes: Vec<NodeData>, mut edges: impl EdgeSpec) -> Self {
+    edges.num_possible_edges(nodes.len()*(nodes.len() - 1));
+    let edges = (0..nodes.len())
+      .flat_map(|i| (0..nodes.len()).map(move |j| (i, j)))
+      .filter_map(move |(i, j)| edges.weight(i, j).map(|w| ((i, j), w)))
+      .collect();
+
+    GraphSpec { nodes, edges }
+  }
+
   pub fn new(size: usize, mut nodes: impl NodeSpec, mut edges: impl EdgeSpec) -> Self {
-    let nodes = (0..size)
+    let nodes : Vec<_> = (0..size)
       .map(|i| {
         NodeData {
           obj: nodes.obj(i).unwrap_or(0),
@@ -49,12 +59,13 @@ impl GraphGen {
       })
       .collect();
 
+    edges.num_possible_edges(nodes.len()*(nodes.len() - 1));
     let edges = (0..size)
       .flat_map(|i| (0..size).map(move |j| (i, j)))
       .filter_map(move |(i, j)| edges.weight(i, j).map(|w| ((i, j), w)))
       .collect();
 
-    GraphGen { nodes, edges }
+    GraphSpec { nodes, edges }
   }
 
   pub fn save_to_file(&self, path: impl AsRef<Path>) {
@@ -99,14 +110,19 @@ impl GraphGen {
         }
       }
     }
-    GraphGen { nodes, edges }
+    GraphSpec { nodes, edges }
   }
 
-  pub fn join(&mut self, other: &GraphGen, mut conn_to_other: impl EdgeSpec, mut conn_from_other: impl EdgeSpec) {
+  pub fn join(&mut self, other: &GraphSpec, mut conn_to_other: impl EdgeSpec, mut conn_from_other: impl EdgeSpec) {
     let node_offset = self.nodes.len();
     for (&(i, j), &e) in &other.edges {
       self.edges.insert((i + node_offset, j + node_offset), e);
     }
+
+    let num_possible_edges =  self.nodes.len()*other.nodes.len();
+    conn_to_other.num_possible_edges(num_possible_edges);
+    conn_from_other.num_possible_edges(num_possible_edges);
+
     for i in 0..self.nodes.len() {
       for j in 0..other.nodes.len() {
         if let Some(w) = conn_to_other.weight(i, j) {
@@ -125,6 +141,8 @@ impl GraphGen {
 pub trait EdgeSpec {
   fn weight(&mut self, from: usize, to: usize) -> Option<Weight>;
 
+  fn num_possible_edges(&mut self, _: usize) {}
+
   fn map_weights<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F> where Self: Sized {
     MapWeights { orig: self, map }
   }
@@ -134,8 +152,19 @@ pub trait EdgeSpec {
   }
 }
 
-impl<'a, T: EdgeSpec> EdgeSpec for &'a mut T {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> { self.weight(from, to) }
+
+pub trait NodeSpec {
+  fn lb(&mut self, _: usize) -> Option<Weight> { None }
+
+  fn ub(&mut self, _: usize) -> Option<Weight> { None }
+
+  fn obj(&mut self, _: usize) -> Option<Weight> { None }
+
+  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N> where Self: Sized {
+    CombinedNodeSpec { first: self, second: other }
+  }
+
+  fn set_num_nodes(&mut self, _: usize) {}
 }
 
 pub struct MapWeights<E, F> {
@@ -144,6 +173,10 @@ pub struct MapWeights<E, F> {
 }
 
 impl<E: EdgeSpec, F: FnMut(usize, usize, Weight) -> Weight> EdgeSpec for MapWeights<E, F> {
+  fn num_possible_edges(&mut self, n: usize) {
+    self.orig.num_possible_edges(n);
+  }
+
   fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
     self.orig.weight(from, to).map(|w| (self.map)(from, to, w))
   }
@@ -163,12 +196,16 @@ impl<E: EdgeSpec, F: FnMut(usize, usize) -> bool> EdgeSpec for MaskEdges<E, F> {
       None
     }
   }
+
+  fn num_possible_edges(&mut self, n: usize) {
+    self.orig.num_possible_edges(n);
+  }
 }
 
 pub struct NoEdges();
 
 impl EdgeSpec for NoEdges {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> { None }
+  fn weight(&mut self, _: usize, _: usize) -> Option<Weight> { None }
 }
 
 pub struct AllEdges(pub Weight);
@@ -226,17 +263,6 @@ impl EdgeSpec for SingleEdge {
   }
 }
 
-pub trait NodeSpec {
-  fn lb(&mut self, i: usize) -> Option<Weight> { None }
-
-  fn ub(&mut self, i: usize) -> Option<Weight> { None }
-
-  fn obj(&mut self, i: usize) -> Option<Weight> { None }
-
-  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N> where Self: Sized {
-    CombinedNodeSpec { first: self, second: other }
-  }
-}
 
 
 pub struct CombinedNodeSpec<A, B> {

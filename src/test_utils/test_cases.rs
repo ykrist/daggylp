@@ -2,7 +2,7 @@ use std::io::Result as IoResult;
 use super::*;
 
 pub fn generate_test_cases() -> IoResult<()> {
-  let k8 = GraphGen::new(
+  let k8 = GraphSpec::new(
     8,
     IdenticalNodes{ lb: 0, ub: 10, obj: 0 },
     AllEdges(0)
@@ -22,7 +22,7 @@ pub fn generate_test_cases() -> IoResult<()> {
     k8.save_to_file(test_input("k8-cei.txt"))
   }
 
-  let k4 = GraphGen::new(
+  let k4 = GraphSpec::new(
     4,
     IdenticalNodes{ lb: 0, ub: 10, obj: 0 },
     AllEdges(0)

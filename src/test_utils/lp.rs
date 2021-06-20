@@ -34,13 +34,13 @@ impl Lp {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::test_utils::{GraphGen, test_input, test_input_dir, test_output};
+  use crate::test_utils::{GraphSpec, test_input, test_input_dir, test_output};
   use crate::graph::*;
   use std::path::Path;
   use crate::viz::GraphViz;
 
   fn compare_feas_with_lp(path: impl AsRef<Path>) {
-    let mut graph = GraphGen::load_from_file(path).build();
+    let mut graph = GraphSpec::load_from_file(path).build();
     for n in graph.nodes.iter_mut() {
       n.obj = 1;
     }

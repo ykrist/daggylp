@@ -1,7 +1,7 @@
 use dot::*;
 use super::graph::*;
 use std::path::Path;
-use crate::test_utils::GraphGen;
+use crate::test_utils::GraphSpec;
 
 impl Graph {
   pub (crate) fn viz(&self) -> VizGraph<'_> {
@@ -150,7 +150,7 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
 
 impl<'a> GraphViz<'a, usize, Edge> for VizGraph<'a> {}
 
-impl<'a> GraphWalk<'a,  usize, (usize, usize)> for GraphGen {
+impl<'a> GraphWalk<'a,  usize, (usize, usize)> for GraphSpec {
   fn nodes(&'a self) -> Nodes<'a, usize> {
     (0..self.nodes.len()).collect::<Vec<_>>().into()
   }
@@ -168,7 +168,7 @@ impl<'a> GraphWalk<'a,  usize, (usize, usize)> for GraphGen {
   }
 }
 
-impl<'a> Labeller<'a, usize, (usize, usize)> for GraphGen {
+impl<'a> Labeller<'a, usize, (usize, usize)> for GraphSpec {
   fn graph_id(&'a self) -> Id<'a> { Id::new("debug").unwrap() }
 
   fn node_id(&'a self, n: &usize) -> Id<'a> { Id::new(format!("n{}", n)).unwrap() }
@@ -184,7 +184,7 @@ impl<'a> Labeller<'a, usize, (usize, usize)> for GraphGen {
 }
 
 
-impl<'a> GraphViz<'a, usize, (usize, usize)> for GraphGen {}
+impl<'a> GraphViz<'a, usize, (usize, usize)> for GraphSpec {}
 
 #[cfg(test)]
 mod tests {
@@ -193,13 +193,13 @@ mod tests {
 
   #[test]
   fn viz() {
-    let g = GraphGen::load_from_file(test_input("simple-f")).build();
+    let g = GraphSpec::load_from_file(test_input("simple-f")).build();
     g.viz().save_svg(test_output("test.svg"));
   }
 
   #[test]
   fn viz_generator() {
-    let g = GraphGen::load_from_file(test_input("simple-f"));
+    let g = GraphSpec::load_from_file(test_input("simple-f"));
     g.save_svg(test_output("test.generator.svg"));
   }
 }

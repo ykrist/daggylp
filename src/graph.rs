@@ -38,7 +38,7 @@ impl Mrs {
 }
 
 
-pub type Weight = u64;
+pub type Weight = i64;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum InfKind {
@@ -645,7 +645,7 @@ mod tests {
   #[test_case("k8-cei" => Infeasible(Cycle))]
   #[test_case("k8-cbi" => Infeasible(Cycle))]
   fn solve(input_name: &str) -> SolveStatus {
-    let mut g = GraphGen::load_from_file(test_input(input_name)).build();
+    let mut g = GraphSpec::load_from_file(test_input(input_name)).build();
     let status = g.solve();
     // if draw {
     g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));

@@ -134,8 +134,8 @@ mod tests {
     c
   }
 
-  fn complete_graph_with_single_nonzero_edge(n: u8) -> GraphGen {
-    let mut g = GraphGen::new(
+  fn complete_graph_with_single_nonzero_edge(n: u8) -> GraphSpec {
+    let mut g = GraphSpec::new(
       n as usize,
       IdenticalNodes { lb: 0, ub: 10, obj: 0 },
       AllEdges(0),
@@ -144,7 +144,7 @@ mod tests {
     g
   }
 
-  fn complete_graph_sccs(sizes: &[u8]) -> GraphGen {
+  fn complete_graph_sccs(sizes: &[u8]) -> GraphSpec {
     let mut sizes = sizes.iter().copied();
     let n = sizes.next().unwrap();
 
@@ -207,9 +207,9 @@ mod tests {
   }
 
 
-  fn cycle_graph(n: u8) -> GraphGen {
+  fn cycle_graph(n: u8) -> GraphSpec {
     let n = n as usize;
-    GraphGen::new(
+    GraphSpec::new(
       n,
       IdenticalNodes { lb: 0, ub: Weight::MAX, obj: 0 },
       CycleEdges { n, weight: 1 },
@@ -246,7 +246,7 @@ mod tests {
   ///
   /// Will have `( k + 1 ) * 2` nodes.  All edges have zero weight, except 0 -> 1.
   /// This means there is always one IIS and exactly k cycles.
-  fn k_cycle_graph(k: u8) -> GraphGen {
+  fn k_cycle_graph(k: u8) -> GraphSpec {
     let mut g = cycle_graph(4);
     g.edges.values_mut().for_each(|w| *w = 0);
     g.edges.insert((0, 1), 1);
