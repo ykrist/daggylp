@@ -4,63 +4,10 @@ use crate::graph::Weight;
 use fnv::FnvHashMap;
 use std::collections::HashMap;
 use proptest::arbitrary::arbitrary;
-
-trait Connectivity {
-  fn connected(&mut self, from: usize, to: usize) -> bool;
-
-  fn set_num_nodes(&mut self, _: usize) {}
-}
-
-struct AllEdges();
-
-impl Connectivity for AllEdges {
-  fn connected(&mut self, _: usize, _: usize) -> bool { true }
-}
-
-struct Cycle(usize);
-
-impl Connectivity for Cycle {
-  fn set_num_nodes(&mut self, n: usize) { self.0 = n }
-
-  fn connected(&mut self, from: usize, to: usize) -> bool {
-    (from + 1) % self.0  == to
-  }
-}
-
-/// Assume nodes are arranged like this:
-/// ```text
-///           0      rank = 0
-///          1 2     rank = 1
-///         3 4 5    rank = 2
-///        6 7 8 9   rank = 3
-///       10 ...
-/// ```
-/// For every sub-triangle of nodes in the big triangle above,
-/// ```text
-///       i
-///      j k
-/// ```
-/// `Triangular` will add edges in three ways:
-///  - left-to-right: eg `j -> k`
-///  - upward: eg `k -> i`
-///  - downward: eg `i -> j`
-struct Triangular;
-
-impl Connectivity for Triangular {
-  fn connected(&mut self, from: usize, to: usize) -> bool {
-    fn node_rank(t: usize) -> usize {
-      let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
-      (r - 1e-10).ceil() as usize
-    }
-
-    let from_rank = node_rank(from);
-    let to_rank = node_rank(to);
-
-    (from_rank == to_rank && from + 1 == to) // left to right edges
-      || (from_rank == to_rank + 1 && from == to + from_rank + 1) // upward edges
-      || (from_rank + 1 == to_rank && from + to_rank == to) // downward edges
-  }
-}
+use proptest::test_runner::TestRunner;
+use crate::test_utils::SccGraphConn;
+use crate::viz::GraphViz;
+use std::fmt::Debug;
 
 
 #[derive(Debug)]
@@ -78,16 +25,13 @@ fn assign_edge_weights(mut edges: EdgeMap, weights: Vec<Weight>) -> EdgeMap {
   }
   edges
 }
-//
-// prop_compose! {
-//   fn edge_map()
-// }
 
-fn node(bounds: impl Strategy<Value=(Weight, Weight)>, obj: impl Strategy<Value=Weight>) -> impl Strategy<Value=NodeData> {
+pub fn node(bounds: impl Strategy<Value=(Weight, Weight)> + Clone, obj: impl Strategy<Value=Weight> + Clone) -> impl Strategy<Value=NodeData> + Clone {
   (obj, bounds).prop_map(|(obj, (lb, ub))| NodeData { lb, ub, obj })
 }
 
-fn graph(
+
+pub fn graph(
   size: usize,
   mut conn: impl Connectivity,
   nodes: impl Strategy<Value=NodeData> + Clone,
@@ -95,46 +39,26 @@ fn graph(
 ) -> impl Strategy<Value=GraphSpec>
 {
   assert!(size > 0);
-  conn.set_num_nodes(size*(size-1));
+  conn.set_size(size, size * (size - 1));
   let nodes = vec![nodes; size];
   let edges: Vec<_> = (0..size).flat_map(|i| (0..size).map(move |j| (i, j)))
-    .filter(move |&(i, j)| conn.connected(i, j))
+    .filter(move |&(i, j)| i != j && conn.connected(i, j))
     .collect();
   let edge_weights = vec![edge_weights; edges.len()];
 
   (nodes, Just(edges), edge_weights).prop_map(|(nodes, edges, edge_weights)| {
     GraphSpec {
       nodes,
-      edges: edges.into_iter().zip(edge_weights).collect()
+      edges: edges.into_iter().zip(edge_weights).collect(),
     }
   })
-
-
-  //
-  // prop::collection::vec(node, size)
-  //   .prop_flat_map(move |nodes| {
-  //     let n = nodes.len();
-  //     conn.set_max_possible_edges(n*(n-1));
-  //
-  //
-  //     let edge_weights = vec![edge_weights; edges.len()];
-  //
-  //     (Just(nodes), Just(edges), edge_weights)
-  //     // let edges = prop::collection::vec(edge_weights, edges.len())
-  //     //   .prop_map(move |weights| {
-  //     //     let edges: EdgeMap = edges.iter().copied().zip(weights).collect();
-  //     //     GraphSpec { edges, nodes: nodes.clone() }
-  //     //   });
-  //   })
-  //   .prop_map(|(nodes, edges, edge_weights)| {
-  //     GraphSpec {
-  //       nodes,
-  //       edges: edges.into_iter().zip(edge_weights).collect()
-  //     }
-  //   })
 }
 
-const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
+pub const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
+pub const MAX_WEIGHT: Weight = MAX_EDGE_WEIGHT;
+pub const MIN_WEIGHT: Weight = -MAX_WEIGHT;
+
+
 //
 // // fn edge(min_node: usize, max_node: usize) -> impl Strategy<Value=EdgeData> {
 // //   (min_node..=max_node, min_node..=max_node, 0..=MAX_EDGE_WEIGHT)
@@ -156,19 +80,91 @@ const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
 // //     .prop_map(|lb, ub|)
 // // }
 //
-fn complete_graph_zero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (1..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(), Just(0)))
+pub fn complete_graph_zero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
+  (2..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(), Just(0)))
 }
 
-fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (1..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(),
-                                          (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
+pub fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
+  (2..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(),
+                                               (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
+}
+
+pub fn scc_graph_conn() -> impl Strategy<Value=SccGraphConn> {
+  prop_oneof![
+    Just(SccGraphConn::Cycle(Cycle::new())),
+    Just(SccGraphConn::Tri(Triangular())),
+    Just(SccGraphConn::Complete(AllEdges())),
+  ]
+}
+
+pub fn scc_graph(
+  size: usize,
+  nodes: impl Strategy<Value=NodeData> + Clone,
+  edge_weights: impl Strategy<Value=Weight> + Clone,
+) -> impl Strategy<Value=GraphSpec> {
+  (scc_graph_conn()).prop_flat_map(move |conn| {
+    graph(size, conn, nodes.clone(), edge_weights.clone())
+  })
+}
+
+pub fn feasible_scc(size: usize, scc_bounds: (Weight, Weight)) -> impl Strategy<Value=GraphSpec> {
+  let (lb, ub) = scc_bounds;
+  scc_graph(
+    size,
+    node((MIN_WEIGHT..=lb, ub..=MAX_WEIGHT), Just(0)),
+    Just(0),
+  )
+}
+
+pub fn cycle_bound_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
+  scc_graph(
+    size,
+    node((MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT), Just(0)),
+    Just(0),
+  ).prop_map(|mut graph| {
+    let min_ub_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].ub).unwrap();
+    let max_lb_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].lb).unwrap();
+
+    let lb = graph.nodes[max_lb_node].lb;
+    let ub = graph.nodes[min_ub_node].ub;
+    if lb <= ub {
+      graph.nodes[max_lb_node].lb = ub;
+      graph.nodes[min_ub_node].ub = lb;
+    }
+    graph
+  })
+}
+
+pub fn cycle_edge_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
+  scc_graph(
+    size,
+    node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
+    MIN_WEIGHT..=MAX_WEIGHT,
+  ).prop_map(|mut graph| {
+    let mut last_edge = None;
+    for (_, w) in graph.edges.iter_mut() {
+      if w != &0 {
+        return graph;
+      }
+      last_edge = Some(w);
+    }
+    *last_edge.expect("at least one edge") = 0;
+    graph
+  })
+}
+
+
+
+// fn cycle_chain_graph_zero_edges(subgraph_sizes: Vec<usize>, nodes: impl Strategy<Value=NodeData> + Clone) ->
+
+pub fn sample_strategy<T>(s: impl Strategy<Value=T>) -> T {
+  use proptest::strategy::ValueTree;
+  s.new_tree(&mut TestRunner::default()).unwrap().current()
 }
 
 //
-// // fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData>) -> impl Strategy<Value=GraphSpec> {
-// //   let nodes = prop::collection::vec(nodes, 0..8);
-// //   let edges = Map::
-// //
-// //     .prop_map(|nodes| GraphSpec::with_node_data(nodes, AllEdges(0)))
-// // }
+// #[cfg(test)]
+// mod tests {
+//   use super::*;
+//   use crate::viz::GraphViz;
+// }

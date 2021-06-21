@@ -3,6 +3,7 @@ use super::graph::*;
 use std::path::Path;
 use crate::test_utils::GraphSpec;
 
+
 impl Graph {
   pub (crate) fn viz(&self) -> VizGraph<'_> {
     VizGraph {
@@ -22,6 +23,24 @@ pub(crate) struct VizGraph<'a> {
   edge_weights: bool,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum LayoutAlgo {
+  Dot,
+  Neato,
+  Fdp,
+}
+
+impl LayoutAlgo {
+  fn prog_name(&self) -> &'static str {
+    use LayoutAlgo::*;
+    match self {
+      Dot => "dot",
+      Neato => "neato",
+      Fdp => "fdp",
+    }
+  }
+}
+
 pub(crate) trait GraphViz<'a, N, E> : GraphWalk<'a, N, E>  + Labeller<'a, N, E> + Sized
   where
     N: Clone + 'a,
@@ -32,13 +51,13 @@ pub(crate) trait GraphViz<'a, N, E> : GraphWalk<'a, N, E>  + Labeller<'a, N, E> 
     render(self, &mut file).unwrap();
   }
 
-  fn save_svg(&'a self, path: impl AsRef<Path>) {
+  fn save_svg_with_layout(&'a self, path: impl AsRef<Path>, layout: LayoutAlgo) {
     use std::process::{Command, Stdio};
     use std::io::Write;
     let mut dot_contents = Vec::with_capacity(1000);
     render(self, &mut dot_contents).unwrap();
 
-    let mut gv = std::process::Command::new("dot")
+    let mut gv = std::process::Command::new(layout.prog_name())
       .arg(format!("-o{}", path.as_ref().as_os_str().to_str().expect("printable filename")))
       .arg("-Grankdir=LR")
       .arg("-Tsvg")
@@ -50,6 +69,10 @@ pub(crate) trait GraphViz<'a, N, E> : GraphWalk<'a, N, E>  + Labeller<'a, N, E> 
 
     gv.stdin.take().unwrap().write_all(&dot_contents).unwrap();
     gv.wait().unwrap();
+  }
+
+  fn save_svg(&'a self, path: impl AsRef<Path>) {
+    self.save_svg_with_layout(path, LayoutAlgo::Dot);
   }
 }
 

@@ -1,13 +1,21 @@
 use std::path::Path;
 use fnv::FnvHashMap;
 use crate::graph::*;
+use proptest::option::of;
+use std::fmt;
 use std::io::Write;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NodeData {
   pub ub: Weight,
   pub lb: Weight,
   pub obj: Weight,
+}
+
+impl fmt::Debug for NodeData {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    f.write_fmt(format_args!("Nd([{},{}], {})", self.lb, self.ub, self.obj))
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -17,15 +25,15 @@ pub struct GraphSpec {
 }
 
 impl GraphSpec {
-  pub fn build(self) -> Graph {
+  pub fn build(&self) -> Graph {
     let mut g = Graph::new();
 
     let vars: Vec<_> = self.nodes
-      .into_iter()
+      .iter()
       .map(|data| g.add_var(data.obj, data.lb, data.ub))
       .collect();
 
-    for ((i, j), d) in self.edges {
+    for (&(i, j), &d) in &self.edges {
       g.add_constr(vars[i], d, vars[j]);
     }
 
@@ -38,18 +46,23 @@ impl GraphSpec {
     n
   }
 
-  pub fn with_node_data(nodes: Vec<NodeData>, mut edges: impl EdgeSpec) -> Self {
-    edges.num_possible_edges(nodes.len()*(nodes.len() - 1));
+  pub fn with_node_data(nodes: Vec<NodeData>, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
+    let num_nodes = nodes.len();
+    let num_possible_edges = num_nodes * (num_nodes - 1);
+    conn.set_size(num_nodes, num_possible_edges);
+    edge_weights.set_size(num_nodes, num_possible_edges);
+
     let edges = (0..nodes.len())
       .flat_map(|i| (0..nodes.len()).map(move |j| (i, j)))
-      .filter_map(move |(i, j)| edges.weight(i, j).map(|w| ((i, j), w)))
+      .filter(move |&(i, j)| i != j && conn.connected(i, j))
+      .map(move |(i, j)| ((i, j), edge_weights.weight(i, j)))
       .collect();
 
     GraphSpec { nodes, edges }
   }
 
-  pub fn new(size: usize, mut nodes: impl NodeSpec, mut edges: impl EdgeSpec) -> Self {
-    let nodes : Vec<_> = (0..size)
+  pub fn new(size: usize, mut nodes: impl NodeSpec, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
+    let nodes: Vec<_> = (0..size)
       .map(|i| {
         NodeData {
           obj: nodes.obj(i).unwrap_or(0),
@@ -59,13 +72,7 @@ impl GraphSpec {
       })
       .collect();
 
-    edges.num_possible_edges(nodes.len()*(nodes.len() - 1));
-    let edges = (0..size)
-      .flat_map(|i| (0..size).map(move |j| (i, j)))
-      .filter_map(move |(i, j)| edges.weight(i, j).map(|w| ((i, j), w)))
-      .collect();
-
-    GraphSpec { nodes, edges }
+    Self::with_node_data(nodes, conn, edge_weights)
   }
 
   pub fn save_to_file(&self, path: impl AsRef<Path>) {
@@ -113,37 +120,189 @@ impl GraphSpec {
     GraphSpec { nodes, edges }
   }
 
-  pub fn join(&mut self, other: &GraphSpec, mut conn_to_other: impl EdgeSpec, mut conn_from_other: impl EdgeSpec) {
-    let node_offset = self.nodes.len();
-    for (&(i, j), &e) in &other.edges {
-      self.edges.insert((i + node_offset, j + node_offset), e);
+  // pub fn join(&mut self, other: &GraphSpec, mut conn_to_other: impl EdgeSpec, mut conn_from_other: impl EdgeSpec) {
+  //   let node_offset = self.nodes.len();
+  //   for (&(i, j), &e) in &other.edges {
+  //     self.edges.insert((i + node_offset, j + node_offset), e);
+  //   }
+  //
+  //   let num_possible_edges =  self.nodes.len()*other.nodes.len();
+  //   conn_to_other.num_possible_edges(num_possible_edges);
+  //   conn_from_other.num_possible_edges(num_possible_edges);
+  //
+  //   for i in 0..self.nodes.len() {
+  //     for j in 0..other.nodes.len() {
+  //       if let Some(w) = conn_to_other.weight(i, j) {
+  //         self.edges.insert((i, j + node_offset), w);
+  //       }
+  //       if let Some(w) = conn_from_other.weight(j, i) {
+  //         self.edges.insert((j + node_offset, i), w);
+  //       }
+  //     }
+  //   }
+  //   self.nodes.extend_from_slice(&other.nodes);
+  // }
+
+  pub fn from_components(subgraphs: Vec<GraphSpec>, conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>) -> Self {
+    let subgraph_size: Vec<_> = subgraphs.iter().map(|g| g.nodes.len()).collect();
+    let offsets: Vec<_> = {
+      let mut offset = &mut 0;
+
+      subgraph_size.iter().map(|&s| {
+        let o = *offset;
+        *offset += s;
+        o
+      }).collect()
+    };
+
+    let mut subgraphs = subgraphs.into_iter();
+
+    let mut g = subgraphs.next().expect("at least one graph");
+    g.nodes.reserve(subgraph_size[1..].iter().copied().sum());
+
+    for (&offset, h) in subgraph_size[1..].iter().zip(subgraphs) {
+      g.nodes.extend_from_slice(&h.nodes);
+      g.edges.extend(h.edges.into_iter().map(|((i, j), w)| ((i + offset, j + offset), w)));
     }
 
-    let num_possible_edges =  self.nodes.len()*other.nodes.len();
-    conn_to_other.num_possible_edges(num_possible_edges);
-    conn_from_other.num_possible_edges(num_possible_edges);
+    for (sg_i, sg_j, mut conn, mut weights) in conn {
+      let ij_nodes = subgraph_size[sg_i] + subgraph_size[sg_j];
+      let ij_edges = subgraph_size[sg_i] * subgraph_size[sg_j];
+      conn.set_size(ij_nodes, ij_edges);
+      weights.set_size(ij_nodes, ij_edges);
 
-    for i in 0..self.nodes.len() {
-      for j in 0..other.nodes.len() {
-        if let Some(w) = conn_to_other.weight(i, j) {
-          self.edges.insert((i, j + node_offset), w);
-        }
-        if let Some(w) = conn_from_other.weight(j, i) {
-          self.edges.insert((j + node_offset, i), w);
+      for i in 0..subgraph_size[sg_i] {
+        let ni = i + offsets[sg_i];
+        for j in 0..subgraph_size[sg_j] {
+          if conn.connected(i, j) {
+            let nj = j + offsets[sg_i];
+            g.edges.insert((ni, nj), weights.weight(i, j));
+          }
         }
       }
     }
-    self.nodes.extend_from_slice(&other.nodes);
+    g
   }
 }
 
 
-pub trait EdgeSpec {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight>;
+pub trait Connectivity {
+  fn connected(&mut self, from: usize, to: usize) -> bool;
 
-  fn num_possible_edges(&mut self, _: usize) {}
+  fn set_size(&mut self, _nodes: usize, _edges: usize) {}
 
-  fn map_weights<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F> where Self: Sized {
+  fn mask<F: FnMut(usize, usize) -> bool>(self, mask: F) -> MaskEdges<Self, F> where Self: Sized {
+    MaskEdges {
+      orig: self,
+      mask,
+    }
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AllEdges();
+
+impl Connectivity for AllEdges {
+  fn connected(&mut self, _: usize, _: usize) -> bool { true }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Cycle(usize);
+
+impl Cycle {
+  pub fn new() -> Self { Cycle(0) }
+}
+
+impl Connectivity for Cycle {
+  fn set_size(&mut self, nodes: usize, _: usize) { self.0 = nodes }
+
+  fn connected(&mut self, from: usize, to: usize) -> bool {
+    (from + 1) % self.0 == to
+  }
+}
+
+/// Assume nodes are arranged like this:
+/// ```text
+///           0      rank = 0
+///          1 2     rank = 1
+///         3 4 5    rank = 2
+///        6 7 8 9   rank = 3
+///       10 ...
+/// ```
+/// For every sub-triangle of nodes in the big triangle above,
+/// ```text
+///       i
+///      j k
+/// ```
+/// `Triangular` will add edges in three ways:
+///  - left-to-right: eg `j -> k`
+///  - upward: eg `k -> i`
+///  - downward: eg `i -> j`
+#[derive(Debug, Copy, Clone)]
+pub struct Triangular();
+
+impl Connectivity for Triangular {
+  fn connected(&mut self, from: usize, to: usize) -> bool {
+    fn node_rank(t: usize) -> usize {
+      let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
+      (r - 1e-10).ceil() as usize
+    }
+
+    let from_rank = node_rank(from);
+    let to_rank = node_rank(to);
+
+    (from_rank == to_rank && from + 1 == to) // left to right edges
+      || (from_rank == to_rank + 1 && from == to + from_rank + 1) // upward edges
+      || (from_rank + 1 == to_rank && from + to_rank == to) // downward edges
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum SccGraphConn {
+  Tri(Triangular),
+  Complete(AllEdges),
+  Cycle(Cycle),
+}
+
+impl Connectivity for SccGraphConn {
+  fn set_size(&mut self, nodes: usize, edges: usize) {
+    match self {
+      SccGraphConn::Cycle(c) => c.set_size(nodes, edges),
+      _ => {}
+    }
+  }
+
+  fn connected(&mut self, from: usize, to: usize) -> bool {
+    match self {
+      SccGraphConn::Cycle(c) => c.connected(from, to),
+      SccGraphConn::Tri(c) => c.connected(from, to),
+      SccGraphConn::Complete(c) => c.connected(from, to),
+    }
+  }
+}
+
+pub struct MaskEdges<E, F> {
+  orig: E,
+  mask: F,
+}
+
+impl<E: Connectivity, F: FnMut(usize, usize) -> bool> Connectivity for MaskEdges<E, F> {
+  fn set_size(&mut self, nodes: usize, edges: usize) {
+    self.orig.set_size(nodes, edges)
+  }
+
+  fn connected(&mut self, from: usize, to: usize) -> bool {
+    (self.mask)(from, to) && self.orig.connected(from, to)
+  }
+}
+
+
+pub trait EdgeWeights {
+  fn set_size(&mut self, _nodes: usize, _edges: usize) {}
+
+  fn weight(&mut self, from: usize, to: usize) -> Weight;
+
+  fn map<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F> where Self: Sized {
     MapWeights { orig: self, map }
   }
 
@@ -151,7 +310,6 @@ pub trait EdgeSpec {
     MaskEdges { orig: self, mask }
   }
 }
-
 
 pub trait NodeSpec {
   fn lb(&mut self, _: usize) -> Option<Weight> { None }
@@ -172,98 +330,22 @@ pub struct MapWeights<E, F> {
   map: F,
 }
 
-impl<E: EdgeSpec, F: FnMut(usize, usize, Weight) -> Weight> EdgeSpec for MapWeights<E, F> {
-  fn num_possible_edges(&mut self, n: usize) {
-    self.orig.num_possible_edges(n);
+impl<E: EdgeWeights, F: FnMut(usize, usize, Weight) -> Weight> EdgeWeights for MapWeights<E, F> {
+  fn set_size(&mut self, nodes: usize, edges: usize) {
+    self.orig.set_size(nodes, edges)
   }
 
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    self.orig.weight(from, to).map(|w| (self.map)(from, to, w))
-  }
-}
-
-
-pub struct MaskEdges<E, F> {
-  orig: E,
-  mask: F,
-}
-
-impl<E: EdgeSpec, F: FnMut(usize, usize) -> bool> EdgeSpec for MaskEdges<E, F> {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    if (self.mask)(from, to) {
-      self.orig.weight(from, to)
-    } else {
-      None
-    }
-  }
-
-  fn num_possible_edges(&mut self, n: usize) {
-    self.orig.num_possible_edges(n);
+  fn weight(&mut self, from: usize, to: usize) -> Weight {
+    (self.map)(from, to, self.orig.weight(from, to))
   }
 }
+
 
 pub struct NoEdges();
 
-impl EdgeSpec for NoEdges {
-  fn weight(&mut self, _: usize, _: usize) -> Option<Weight> { None }
+impl Connectivity for NoEdges {
+  fn connected(&mut self, _: usize, _: usize) -> bool { false }
 }
-
-pub struct AllEdges(pub Weight);
-
-impl EdgeSpec for AllEdges {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    if from == to { None } else { Some(self.0) }
-  }
-}
-
-pub struct CycleEdges {
-  pub n: usize,
-  pub weight: Weight
-}
-
-impl EdgeSpec for CycleEdges {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    if (from + 1) % self.n == to {
-      Some(self.weight)
-    } else {
-      None
-    }
-  }
-}
-
-pub struct ArbitraryKEdges {
-  pub k: usize,
-  pub weight: Weight
-}
-
-impl EdgeSpec for ArbitraryKEdges {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    if self.k > 0 {
-      self.k -= 1;
-      Some(self.weight)
-    } else {
-      None
-    }
-  }
-}
-
-pub struct SingleEdge {
-  pub from: usize,
-  pub to: usize,
-  pub weight: Weight,
-}
-
-impl EdgeSpec for SingleEdge {
-  fn weight(&mut self, from: usize, to: usize) -> Option<Weight> {
-    if (from, to) == (self.from, self.to) {
-      Some(self.weight)
-    } else {
-      None
-    }
-  }
-}
-
-
 
 pub struct CombinedNodeSpec<A, B> {
   first: A,

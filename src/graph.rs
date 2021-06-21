@@ -333,7 +333,6 @@ impl Graph {
       self.state = state;
     } else {
       let sccs = self.find_sccs();
-      dbg!(&sccs);
       let inf_idx = sccs.iter().enumerate()
         .find(|(_, scc)| !self.scc_is_feasible(scc))
         .map(|(idx, _)| idx);
@@ -507,7 +506,6 @@ impl Graph {
         tarjan(&mut sccs, &self.edges_from, &mut stack, &mut attr, n, &mut next_idx);
       }
     }
-    dbg!(&sccs);
     sccs
   }
 
@@ -544,7 +542,6 @@ impl Graph {
       self.nodes.push(scc_node);
 
       for &n in &scc {
-        dbg!(n, scc_idx);
         self.nodes[n].kind = NodeKind::SccMember(scc_idx);
       }
 
@@ -555,9 +552,6 @@ impl Graph {
         ub_node,
       });
     }
-
-    eprintln!("{:?}", &self.nodes);
-    eprintln!("{:?}", &self.sccs);
 
     // Add new edges in and out of the SCC
     let mut new_edges = FnvHashMap::<(usize, usize), Edge>::default();

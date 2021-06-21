@@ -1,15 +1,19 @@
 use super::*;
 use crate::iis::Iis;
+use crate::test_utils::{GraphSpec, test_output_dir, proptest_config_cases};
+use crate::viz::{GraphViz, LayoutAlgo};
+use proptest::prelude::{TestCaseError, Strategy};
+use proptest::test_runner::{TestCaseResult, TestError};
 
 pub enum Enumeration {}
 
 impl FindCyclicIis<Enumeration> for Graph {
   fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    self.iter_cyclic_iis(sccs).next().unwrap()
+    self.iter_cyclic_iis(sccs.iter()).next().unwrap()
   }
 
   fn find_smallest_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    self.iter_cyclic_iis(sccs).min_by_key(|iis| iis.len()).unwrap()
+    self.iter_cyclic_iis(sccs.iter()).min_by_key(|iis| iis.len()).unwrap()
   }
 }
 
@@ -27,62 +31,70 @@ type BlockList = Vec<FnvHashSet<usize>>;
 /// An iterator version of the simple-cycle enumeration algorithm
 /// by Loizou and Thanisch (1982)
 #[derive(Clone)]
-pub struct CycleIter<'a> {
+pub struct CycleIter<'a, I> {
   one_cycle_per_scc: bool,
   local_variables: Vec<StackVariables<'a>>,
   marked: Vec<bool>,
   reached: Vec<bool>,
-  blist: BlockList,
+  blocked_pred: BlockList,
+  blocked_succ: BlockList,
   current_path_pos: Vec<usize>,
   current_path: Vec<usize>,
   graph: &'a Graph,
-  sccs: &'a [FnvHashSet<usize>],
+  sccs: I,
+  current_scc: Option<&'a FnvHashSet<usize>>,
   empty: bool,
 }
 
-impl<'a> CycleIter<'a> {
+impl<'a, I> CycleIter<'a, I>
+  where I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+{
   fn no_cycle(&mut self, x: usize, y: usize) {
-    self.blist[y].insert(x);
+    // println!("block({} -> {}), {:?}", x, y, &self.current_path);
+    self.blocked_pred[y].insert(x);
+    self.blocked_succ[x].insert(y);
   }
 
   fn unmark(&mut self, y: usize) {
     self.marked[y] = false;
-    for x in self.blist[y].clone() { // TODO can we avoid the clone here?
+    // println!("unmark({}), {:?}", y, &self.current_path);
+    for x in self.blocked_pred[y].clone() { // TODO can we avoid the clone here?
+      let removed = self.blocked_succ[x].remove(&y);
+      debug_assert!(removed);
       if self.marked[x] {
         self.unmark(x);
       }
     }
-    self.blist[y].clear();
+    self.blocked_pred[y].clear();
   }
 
-  pub fn new(graph: &'a Graph, sccs: &'a [FnvHashSet<usize>], one_cycle_per_scc: bool) -> Self {
+  pub fn new(graph: &'a Graph, mut sccs: I, one_cycle_per_scc: bool) -> Self {
     let mut iter = CycleIter {
       one_cycle_per_scc,
       local_variables: Default::default(),
       marked: vec![false; graph.nodes.len()],
       reached: vec![false; graph.nodes.len()],
-      blist: vec![Default::default(); graph.nodes.len()],
+      blocked_pred: vec![Default::default(); graph.nodes.len()],
+      blocked_succ: vec![Default::default(); graph.nodes.len()],
       current_path_pos: vec![usize::MAX; graph.nodes.len()],
       current_path: Vec::with_capacity(64),
       graph,
+      current_scc: None,
       sccs,
       empty: false,
     };
-    iter.init_scc();
+    iter.next_scc();
     iter
   }
 
-  fn init_scc(&mut self) {
-    let root = *self.sccs[0].iter().max_by_key(|&&n| self.graph.edges_to[n].len()).unwrap();
+  fn next_scc(&mut self) {
+    self.current_scc = self.sccs.next();
     self.current_path.clear();
     self.local_variables.clear();
-    self.pre_loop(root);
-  }
 
-  fn next_scc(&mut self) {
-    self.sccs = &self.sccs[1..];
-    if !self.sccs.is_empty() {
-      self.init_scc();
+    if let Some(scc) = self.current_scc {
+      let root = *scc.iter().max_by_key(|&&n| self.graph.edges_to[n].len()).unwrap();
+      self.pre_loop(root);
     }
   }
 
@@ -93,29 +105,27 @@ impl<'a> CycleIter<'a> {
     debug_assert_eq!(self.current_path_pos[v], usize::MAX);
     self.current_path_pos[v] = self.current_path.len();
     self.current_path.push(v);
+    // println!("mark({}), {:?}", v, &self.current_path);
   }
 
   /// step through the neighbours loop until we find cycle or finish the loop
   fn neighbours_loop(&mut self) -> Option<Vec<usize>> {
     let sp = self.local_variables.len() - 1;
     let v = self.local_variables[sp].v;
+    let scc = self.current_scc.unwrap();
 
     while let Some(e) = self.local_variables[sp].edges_from_v.get(self.local_variables[sp].edge_idx) {
       self.local_variables[sp].edge_idx += 1;
       let w = e.to;
-      if !self.sccs[0].contains(&w) && !self.blist[v].contains(&w) {
+      if !scc.contains(&w) || self.blocked_succ[v].contains(&w) {
         continue;
       }
-      // TODO: check if in blocklist?
       if !self.marked[w] {
         // Recursive call begins
         self.pre_loop(w); // stack push
         if let Some(cycle) = self.neighbours_loop() { // recurse - callee will run post-loop
           self.local_variables[sp].cycle_found = true; // don't pop stack - inner call might emit more
           return Some(cycle);
-        } else {
-          // inner loop has finished
-          // self.post_loop(); // stack pop
         }
         // recursive call end - no cycles found
         self.no_cycle(v, w);
@@ -124,7 +134,7 @@ impl<'a> CycleIter<'a> {
         self.local_variables[sp].cycle_found = true;
         let start = self.current_path_pos[w];
         debug_assert_ne!(start, usize::MAX);
-        // println!("sss {}, {:?}", w, self.current_path);
+        // println!("cycle w={}, {:?} -> {:?}", w, &self.current_path, &self.current_path[start..]);
         return Some(self.current_path[start..].to_vec());
       } else {
         self.no_cycle(v, w);
@@ -151,11 +161,13 @@ impl<'a> CycleIter<'a> {
 }
 
 
-impl Iterator for CycleIter<'_> {
+impl<'a, I> Iterator for CycleIter<'a, I>
+  where I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+{
   type Item = Vec<usize>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    while !self.sccs.is_empty() {
+    while self.current_scc.is_some() {
       let cycle = self.neighbours_loop();
       if cycle.is_some() {
         if self.one_cycle_per_scc {
@@ -173,14 +185,18 @@ impl Iterator for CycleIter<'_> {
 }
 
 #[derive(Clone)]
-pub struct CyclicIisIter<'a> {
+pub struct CyclicIisIter<'a, I> {
   one_iis_per_scc: bool,
-  cycle_iter: CycleIter<'a>,
+  cycle_iter: CycleIter<'a, I>,
   graph: &'a Graph,
 }
 
-impl<'a> CyclicIisIter<'a> {
-  fn new(graph: &'a Graph, sccs: &'a [FnvHashSet<usize>], one_iis_per_scc: bool) -> Self {
+impl<'a, I> CyclicIisIter<'a, I>
+  where
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+{
+  fn new(graph: &'a Graph, sccs: I, one_iis_per_scc: bool) -> Self
+  {
     CyclicIisIter {
       cycle_iter: CycleIter::new(graph, sccs, false),
       one_iis_per_scc,
@@ -189,15 +205,19 @@ impl<'a> CyclicIisIter<'a> {
   }
 }
 
-impl Iterator for CyclicIisIter<'_> {
+impl<'a, I> Iterator for CyclicIisIter<'a, I>
+  where
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+{
   type Item = Iis;
 
   fn next(&mut self) -> Option<Self::Item> {
     while let Some(cycle) = self.cycle_iter.next() {
+      println!("{:?}", &cycle);
       match self.graph.cycle_infeasible(&cycle) {
         None => continue,
         Some(kind) => {
-          println!("{:?}", &cycle);
+          println!("inf: {:?}", &cycle);
           let mut iis = Iis::from_cycle(cycle.iter().map(|n| self.graph.var_from_node_id(*n)));
           match kind {
             CyclicInfKind::Pure => {}
@@ -280,11 +300,112 @@ impl Graph {
     return None;
   }
 
-  fn iter_cycles<'a>(&'a self, sccs: &'a [FnvHashSet<usize>]) -> CycleIter<'a> {
-    CycleIter::new(self, sccs, false)
+  fn iter_cycles<'a, I>(&'a self, sccs: I) -> CycleIter<'a, I::IntoIter>
+    where
+      I: IntoIterator<Item=&'a FnvHashSet<usize>>,
+      I::IntoIter: 'a,
+  {
+    CycleIter::new(self, sccs.into_iter(), false)
   }
 
-  fn iter_cyclic_iis<'a>(&'a self, sccs: &'a [FnvHashSet<usize>]) -> CyclicIisIter<'a> {
-    CyclicIisIter::new(self, sccs, false)
+  fn iter_cyclic_iis<'a, I>(&'a self, sccs: I) -> CyclicIisIter<'a, I::IntoIter>
+    where
+      I: IntoIterator<Item=&'a FnvHashSet<usize>>,
+      I::IntoIter: 'a,
+  {
+    CyclicIisIter::new(self, sccs.into_iter(), false)
   }
+}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use proptest::prelude::*;
+  use crate::test_utils::*;
+  use crate::*;
+
+  fn set_arbitrary_edge_to_one(graph: impl Strategy<Value=GraphSpec>) -> impl Strategy<Value=GraphSpec> {
+    (graph, any::<prop::sample::Selector>())
+      .prop_map(|(mut graph, selector)| {
+        let e = *selector.select(graph.edges.keys());
+        graph.edges.insert(e, 1);
+        graph
+      })
+  }
+
+  fn cycle_graph(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
+    (2..1000usize).prop_flat_map(move |size|
+      strategy::graph(size, Cycle::new(), nodes.clone(), 0..strategy::MAX_EDGE_WEIGHT))
+  }
+
+
+  enum Tests {}
+  impl Tests {
+    fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> TestCaseResult {
+      let num_nodes = g.nodes.len();
+      g.solve();
+      let (sccs, first_inf_scc) = match &g.state {
+        ModelState::InfCycle { sccs, first_inf_scc } => (&*sccs, *first_inf_scc),
+        _ => return Err(TestCaseError::fail("should find infeasible cycles")),
+      };
+      prop_assert_eq!(g.sccs.len(), 0, "SCCs should only be present when feasible");
+      prop_assert_eq!(sccs.len(), 1, "Complete graph has one SCC");
+      let mut cycle_cnt = g.iter_cycles(sccs).count() as u128;
+      prop_assert_eq!(cycle_cnt, n_cycles);
+      let mut iis_cnt = g.iter_cyclic_iis(&sccs[first_inf_scc..]).count() as u128;
+      prop_assert_eq!(iis_cnt, n_iis);
+      Ok(())
+    }
+
+    pub fn count_cycles_and_iis_cycle_graph(g: &mut Graph) -> TestCaseResult {
+      let n_iis = if g.edges_to.iter().flat_map(|edges| edges.iter()).any(|e| e.weight != 0) {
+        1
+      } else {
+        0
+      };
+      Self::check_iis_and_cycles_counts(g, n_iis, 1)
+    }
+
+    pub fn count_cycles_and_iis_complete_graph(g: &mut Graph) -> TestCaseResult {
+      let n = g.nodes.len();
+
+      // Number of cycles of length k is `(n choose k) / k`
+      let n_cycles = {
+        let mut c = 0;
+        for k in 2..=n {
+          let mut q: u128 = (n - k + 1) as u128;
+          for x in (n - k + 2)..=n {
+            q *= (x as u128);
+          }
+          c += q / (k as u128);
+        }
+        c
+      };
+
+      // One edge `(i, j)` has non-zero weight, so number of k-cycles o.t.f
+      // `[i, ... seq of length k-2, ..., j]` is `(n - 2 choose k - 2)`
+      let n_iis = {
+        let mut total = 0u128;
+        for k in 2..=n {
+          let mut prod = 1;
+          for i in (n - k + 1)..=(n - 2) { // may be empty if k == 2
+            prod *= i as u128;
+          }
+          total += prod;
+        }
+        total
+      };
+
+      Self::check_iis_and_cycles_counts(g, n_iis, n_cycles)
+    }
+  }
+
+  graph_tests!(
+    Tests;
+    set_arbitrary_edge_to_one(strategy::complete_graph_zero_edges(Just(NodeData{lb: 0, ub: 1, obj: 0})))
+      => count_cycles_and_iis_complete_graph [layout=LayoutAlgo::Fdp];
+    cycle_graph(Just(NodeData{lb: 0, ub: 1, obj: 0}))
+      => count_cycles_and_iis_cycle_graph [layout=LayoutAlgo::Fdp];
+  );
 }
