@@ -1,5 +1,5 @@
 use super::graph::*;
-use crate::{Result, Error};
+use crate::{Error};
 
 pub(crate) enum ModelAction {
   Solve,
@@ -8,7 +8,7 @@ pub(crate) enum ModelAction {
 }
 
 impl Graph {
-  pub(crate) fn check_allowed_action(&self, action: ModelAction) -> Result<()> {
+  pub(crate) fn check_allowed_action(&self, action: ModelAction) -> Result<(), Error> {
     use ModelState::*;
     use ModelAction::*;
 

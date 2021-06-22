@@ -10,10 +10,10 @@ pub use test_cases::generate_test_cases;
 use crate::viz::{GraphViz, LayoutAlgo};
 use crate::graph::Graph;
 
+use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailurePersistence};
 use proptest::prelude::*;
-use proptest::test_runner::{TestCaseError, TestCaseResult, TestError};
-
 use std::path::{PathBuf, Path};
+
 
 pub(crate) fn test_input_dir() -> &'static Path {
   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
@@ -54,10 +54,16 @@ type GraphTestResult = std::result::Result<(), String>;
 
 impl GraphTestRunner {
   pub fn new_with_layout_prog(id: &'static str, layout: LayoutAlgo) -> Self {
+    // Ok to leak memory here - is only for testing and we only leak once per test.
+    // let path: &'static str = Box::leak(format!("{}/tests/regressions/{}.txt", env!("CARGO_MANIFEST_DIR"), id).into_boxed_str());
+
+    let mut config = ProptestConfig::with_cases(1000);
+    config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
+    config.result_cache = prop::test_runner::basic_result_cache;
     GraphTestRunner {
       id,
       layout,
-      config: ProptestConfig::with_cases(1000),
+      config,
     }
   }
 
@@ -102,7 +108,7 @@ impl GraphTestRunner {
     let mut path = test_output_dir().join("failures");
     path.push(id);
     path.set_extension("txt");
-    let input = GraphSpec::load_from_file(path);
+    let input = GraphSpec::load_from_file(path).pretty_unwrap();
     let mut graph = input.build();
 
     match test(&mut graph) {
@@ -125,6 +131,19 @@ impl GraphTestRunner {
   }
 }
 
+#[macro_export]
+macro_rules! test_case_fail {
+    ($($args:tt)*) => {
+      Err(proptest::test_runner::TestCaseError::fail(format!($($args)*)))
+    };
+}
+
+#[macro_export]
+macro_rules! test_case_bail {
+    ($($args:tt)*) => {
+      return test_case_fail!($($args)*)
+    };
+}
 
 #[macro_export]
 macro_rules! graph_tests {
@@ -132,7 +151,7 @@ macro_rules! graph_tests {
         $(
           #[test]
           fn $test() {
-            let mut runner = GraphTestRunner::new_with_layout_prog(stringify!($test), LayoutAlgo::Dot);
+            let mut runner = GraphTestRunner::new(stringify!($test));
             $(
               graph_tests!(@KW runner : $($kwargs)* );
             )*;
@@ -162,10 +181,30 @@ macro_rules! graph_tests {
 
 #[macro_export]
 macro_rules! graph_test_dbg {
-      ($m:path, $test:ident) => {
+      ($m:path; $test:ident) => {
         #[test]
         fn dbg() {
-          GraphTestRunner::debug(stringify!($ident), <$m>::$test)
+          GraphTestRunner::debug(stringify!($test), <$m>::$test)
         }
       };
   }
+
+pub trait PrettyUnwrap {
+  type Value;
+  fn pretty_unwrap(self) -> Self::Value;
+}
+
+impl<T> PrettyUnwrap for anyhow::Result<T> {
+  type Value = T;
+  fn pretty_unwrap(self) -> Self::Value {
+    match self {
+      Ok(v) => v,
+      Err(e) => {
+        eprintln!("ERROR:\n{:?}", e);
+        panic!("unrecoverable error: see above");
+      }
+    }
+  }
+}
+
+

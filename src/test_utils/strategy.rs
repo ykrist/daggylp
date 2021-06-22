@@ -30,6 +30,9 @@ pub fn node(bounds: impl Strategy<Value=(Weight, Weight)> + Clone, obj: impl Str
   (obj, bounds).prop_map(|(obj, (lb, ub))| NodeData { lb, ub, obj })
 }
 
+pub fn default_nodes() -> impl Strategy<Value=NodeData> + Clone {
+  Just(NodeData{ lb: 0, ub: 1, obj: 0 })
+}
 
 pub fn graph(
   size: usize,
@@ -38,6 +41,7 @@ pub fn graph(
   edge_weights: impl Strategy<Value=Weight> + Clone,
 ) -> impl Strategy<Value=GraphSpec>
 {
+  dbg!(size);
   assert!(size > 0);
   conn.set_size(size, size * (size - 1));
   let nodes = vec![nodes; size];
@@ -46,12 +50,12 @@ pub fn graph(
     .collect();
   let edge_weights = vec![edge_weights; edges.len()];
 
-  (nodes, Just(edges), edge_weights).prop_map(|(nodes, edges, edge_weights)| {
+  (nodes, Just(edges), edge_weights).prop_map(|(nodes, edges, edge_weights)|
     GraphSpec {
       nodes,
       edges: edges.into_iter().zip(edge_weights).collect(),
     }
-  })
+  )
 }
 
 pub const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
@@ -153,7 +157,14 @@ pub fn cycle_edge_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> 
   })
 }
 
-
+pub fn set_arbitrary_edge_to_one(graph: impl Strategy<Value=GraphSpec>) -> impl Strategy<Value=GraphSpec> {
+  (graph, any::<prop::sample::Selector>())
+    .prop_map(|(mut graph, selector)| {
+      let e = *selector.select(graph.edges.keys());
+      graph.edges.insert(e, 1);
+      graph
+    })
+}
 
 // fn cycle_chain_graph_zero_edges(subgraph_sizes: Vec<usize>, nodes: impl Strategy<Value=NodeData> + Clone) ->
 

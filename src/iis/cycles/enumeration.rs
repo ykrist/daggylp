@@ -323,16 +323,10 @@ mod tests {
   use super::*;
   use proptest::prelude::*;
   use crate::test_utils::*;
+  use crate::test_utils::strategy::*;
   use crate::*;
 
-  fn set_arbitrary_edge_to_one(graph: impl Strategy<Value=GraphSpec>) -> impl Strategy<Value=GraphSpec> {
-    (graph, any::<prop::sample::Selector>())
-      .prop_map(|(mut graph, selector)| {
-        let e = *selector.select(graph.edges.keys());
-        graph.edges.insert(e, 1);
-        graph
-      })
-  }
+
 
   fn cycle_graph(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
     (2..1000usize).prop_flat_map(move |size|
@@ -403,7 +397,7 @@ mod tests {
 
   graph_tests!(
     Tests;
-    set_arbitrary_edge_to_one(strategy::complete_graph_zero_edges(Just(NodeData{lb: 0, ub: 1, obj: 0})))
+    set_arbitrary_edge_to_one(complete_graph_zero_edges(Just(NodeData{lb: 0, ub: 1, obj: 0})))
       => count_cycles_and_iis_complete_graph [layout=LayoutAlgo::Fdp];
     cycle_graph(Just(NodeData{lb: 0, ub: 1, obj: 0}))
       => count_cycles_and_iis_cycle_graph [layout=LayoutAlgo::Fdp];

@@ -1,7 +1,7 @@
 use dot::*;
 use super::graph::*;
 use std::path::Path;
-use crate::test_utils::GraphSpec;
+use crate::test_utils::{GraphSpec};
 
 
 impl Graph {
@@ -216,13 +216,13 @@ mod tests {
 
   #[test]
   fn viz() {
-    let g = GraphSpec::load_from_file(test_input("simple-f")).build();
+    let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap().build();
     g.viz().save_svg(test_output("test.svg"));
   }
 
   #[test]
   fn viz_generator() {
-    let g = GraphSpec::load_from_file(test_input("simple-f"));
+    let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
     g.save_svg(test_output("test.generator.svg"));
   }
 }

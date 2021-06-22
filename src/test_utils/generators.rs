@@ -4,6 +4,7 @@ use crate::graph::*;
 use proptest::option::of;
 use std::fmt;
 use std::io::Write;
+use anyhow::Context;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NodeData {
@@ -23,6 +24,17 @@ pub struct GraphSpec {
   pub nodes: Vec<NodeData>,
   pub edges: FnvHashMap<(usize, usize), Weight>,
 }
+
+#[derive(Debug, Clone)]
+pub struct ParsingError(usize);
+
+impl fmt::Display for ParsingError {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    f.write_fmt(format_args!("unable to parse line {}", self.0))
+  }
+}
+
+impl std::error::Error for ParsingError {}
 
 impl GraphSpec {
   pub fn build(&self) -> Graph {
@@ -88,8 +100,8 @@ impl GraphSpec {
     }
   }
 
-  pub fn load_from_file(path: impl AsRef<Path>) -> Self {
-    let contents = std::fs::read_to_string(path).unwrap();
+  pub fn load_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    let contents = std::fs::read_to_string(&path).with_context(|| format!("read file {:?}", path.as_ref()))?;
     let mut nodes = Vec::new();
     let mut edges = FnvHashMap::default();
 
@@ -117,31 +129,8 @@ impl GraphSpec {
         }
       }
     }
-    GraphSpec { nodes, edges }
+    Ok(GraphSpec { nodes, edges })
   }
-
-  // pub fn join(&mut self, other: &GraphSpec, mut conn_to_other: impl EdgeSpec, mut conn_from_other: impl EdgeSpec) {
-  //   let node_offset = self.nodes.len();
-  //   for (&(i, j), &e) in &other.edges {
-  //     self.edges.insert((i + node_offset, j + node_offset), e);
-  //   }
-  //
-  //   let num_possible_edges =  self.nodes.len()*other.nodes.len();
-  //   conn_to_other.num_possible_edges(num_possible_edges);
-  //   conn_from_other.num_possible_edges(num_possible_edges);
-  //
-  //   for i in 0..self.nodes.len() {
-  //     for j in 0..other.nodes.len() {
-  //       if let Some(w) = conn_to_other.weight(i, j) {
-  //         self.edges.insert((i, j + node_offset), w);
-  //       }
-  //       if let Some(w) = conn_from_other.weight(j, i) {
-  //         self.edges.insert((j + node_offset, i), w);
-  //       }
-  //     }
-  //   }
-  //   self.nodes.extend_from_slice(&other.nodes);
-  // }
 
   pub fn from_components(subgraphs: Vec<GraphSpec>, conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>) -> Self {
     let subgraph_size: Vec<_> = subgraphs.iter().map(|g| g.nodes.len()).collect();
@@ -241,15 +230,19 @@ impl Connectivity for Cycle {
 #[derive(Debug, Copy, Clone)]
 pub struct Triangular();
 
+pub fn triangular_number(n: usize) -> usize {
+  return n*(n + 3) / 2
+}
+
+pub fn inverse_triangular_number(t: usize) -> usize {
+  let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
+  (r - 1e-10).ceil() as usize
+}
+
 impl Connectivity for Triangular {
   fn connected(&mut self, from: usize, to: usize) -> bool {
-    fn node_rank(t: usize) -> usize {
-      let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
-      (r - 1e-10).ceil() as usize
-    }
-
-    let from_rank = node_rank(from);
-    let to_rank = node_rank(to);
+    let from_rank = inverse_triangular_number(from);
+    let to_rank = inverse_triangular_number(to);
 
     (from_rank == to_rank && from + 1 == to) // left to right edges
       || (from_rank == to_rank + 1 && from == to + from_rank + 1) // upward edges

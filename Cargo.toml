@@ -5,12 +5,13 @@ name = "daggylp"
 version = "0.1.0"
 
 [dependencies]
-dot = "0.1.4"
-fnv = "*"
-glob = "0.3.0"
-proptest = "1.0.0"
-rand = { version = "0.8.3", features = ["small_rng"]}
-grb = { version = "1.0.4", optional = true }
+dot = "0.1.4" # dev
+fnv = "^1.0.7"
+glob = "0.3.0" # dev
+proptest = "1.0.0" # dev
+rand = { version = "0.8.3", features = ["small_rng"]} # dev
+grb = { version = "1.0.4", optional = true } # dev + grb
+anyhow = "1.0.41" # dev
 
 [features]
 tests-gurobi = ["grb"]

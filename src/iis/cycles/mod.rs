@@ -3,7 +3,7 @@ mod shortest_path;
 
 use crate::graph::*;
 use fnv::{FnvHashSet, FnvHashMap};
-use crate::{Result, set_with_capacity, Error, map_with_capacity};
+use crate::{set_with_capacity, Error, map_with_capacity};
 use std::iter::once;
 use std::collections::VecDeque;
 use crate::iis::Iis;
