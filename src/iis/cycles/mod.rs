@@ -1,13 +1,13 @@
-mod enumeration;
-mod shortest_path;
-
 use crate::graph::*;
 use fnv::{FnvHashSet, FnvHashMap};
 use crate::{set_with_capacity, Error, map_with_capacity};
 use std::iter::once;
 use std::collections::VecDeque;
 use crate::iis::Iis;
+use crate::scc::SccInfo;
 
+mod enumeration;
+mod shortest_path;
 pub use shortest_path::ShortestPathAlg;
 
 
@@ -17,42 +17,7 @@ enum CyclicInfKind {
   Bounds { lb: usize, ub: usize },
 }
 
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Prune {
-  // No pruning
-  AllDest,
-  // Find the best destination and prune others (stop)
-  BestDest,
-  // Find the best dest less than
-  BestDestLessThan(u32),
-  // All dest less than
-  AllDestLessThan(u32),
-}
 
-impl Prune {
-  fn all_dests(&self) -> bool {
-    use Prune::*;
-    matches!(self, AllDest | AllDestLessThan(..))
-  }
-
-  fn bound(&self) -> Option<u32> {
-    use Prune::*;
-    match self {
-      BestDestLessThan(bnd) | AllDestLessThan(bnd) => Some(*bnd),
-      AllDest | BestDest => None
-    }
-  }
-
-  fn update_bound(&mut self, f: impl FnOnce(u32) -> u32) {
-    use Prune::*;
-    match self {
-      BestDestLessThan(bnd) | AllDestLessThan(bnd) => {
-        *bnd = f(*bnd);
-      }
-      AllDest | BestDest => {}
-    }
-  }
-}
 
 trait FindCyclicIis<A> {
   fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis;

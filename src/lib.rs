@@ -6,6 +6,7 @@ mod error;
 mod model_states;
 
 pub mod test_utils;
+mod scc;
 
 pub use error::*;
 

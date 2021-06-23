@@ -4,6 +4,43 @@ use crate::iis::Iis;
 pub enum ShortestPathAlg {}
 
 #[derive(Debug, Copy, Clone)]
+pub(crate) enum Prune {
+  // No pruning
+  AllDest,
+  // Find the best destination and prune others (stop)
+  BestDest,
+  // Find the best dest less than
+  BestDestLessThan(u32),
+  // All dest less than
+  AllDestLessThan(u32),
+}
+
+impl Prune {
+  fn all_dests(&self) -> bool {
+    use Prune::*;
+    matches!(self, AllDest | AllDestLessThan(..))
+  }
+
+  fn bound(&self) -> Option<u32> {
+    use Prune::*;
+    match self {
+      BestDestLessThan(bnd) | AllDestLessThan(bnd) => Some(*bnd),
+      AllDest | BestDest => None
+    }
+  }
+
+  fn update_bound(&mut self, f: impl FnOnce(u32) -> u32) {
+    use Prune::*;
+    match self {
+      BestDestLessThan(bnd) | AllDestLessThan(bnd) => {
+        *bnd = f(*bnd);
+      }
+      AllDest | BestDest => {}
+    }
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
 enum Label {
   // The source node
   Src { node: usize },

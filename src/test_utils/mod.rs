@@ -13,7 +13,7 @@ use crate::graph::Graph;
 use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailurePersistence};
 use proptest::prelude::*;
 use std::path::{PathBuf, Path};
-
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 pub(crate) fn test_input_dir() -> &'static Path {
   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
@@ -48,9 +48,17 @@ pub struct GraphTestRunner {
   id: &'static str,
   layout: LayoutAlgo,
   config: ProptestConfig,
+  input_graph: PathBuf,
+  input_meta: PathBuf,
+  input_svg: PathBuf,
+  output_svg: PathBuf,
 }
 
 type GraphTestResult = std::result::Result<(), String>;
+
+#[derive(Deserialize, Serialize, Copy, Clone, Debug)]
+struct NulInputMeta;
+
 
 impl GraphTestRunner {
   pub fn new_with_layout_prog(id: &'static str, layout: LayoutAlgo) -> Self {
@@ -60,10 +68,26 @@ impl GraphTestRunner {
     let mut config = ProptestConfig::with_cases(1000);
     config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
     config.result_cache = prop::test_runner::basic_result_cache;
+
+    let mut path = test_output_dir().join("failures");
+    path.push(id);
+    let output_svg = path.with_extension("svg");
+    let mut path = path.into_os_string();
+    path.push("-input");
+    let mut path = PathBuf::from(path);
+    let input_meta = path.with_extension("json");
+    let input_graph = path.with_extension("txt");
+    path.set_extension("svg");
+    let input_svg = path;
+
     GraphTestRunner {
       id,
       layout,
       config,
+      output_svg,
+      input_meta,
+      input_svg,
+      input_graph
     }
   }
 
@@ -71,47 +95,51 @@ impl GraphTestRunner {
     Self::new_with_layout_prog(id, LayoutAlgo::Dot)
   }
 
-  pub fn run(&self, inputs: impl Strategy<Value=GraphSpec>, test: fn(&mut Graph) -> TestCaseResult) {
+  pub fn run(&self, inputs: impl Strategy<Value=(GraphSpec)>, test: impl Fn(&mut Graph) -> TestCaseResult) {
+    self.run_with_answer(inputs.prop_map(|g| (g, NulInputMeta)), move |g, _| test(g))
+  }
+
+  pub fn run_with_answer<T: Serialize>(&self, inputs: impl Strategy<Value=(GraphSpec, T)>, test: impl Fn(&mut Graph, T) -> TestCaseResult) {
     use TestError::*;
     let mut runner = prop::test_runner::TestRunner::new(self.config.clone());
-    let result = runner.run(&inputs, |g| {
+    let result = runner.run(&inputs, |(g, ans)| {
       let mut g = g.build();
-      test(&mut g)
+      test(&mut g, ans)
     });
 
-
-    if let Err(Fail(reason, input)) = &result {
-      let mut dir = test_output_dir().join("failures");
-      std::fs::create_dir_all(&dir).unwrap();
-      dir.push(self.id);
-      input.save_to_file(dir.with_extension("txt"));
-      input.save_svg_with_layout(dir.with_extension("input.svg"), self.layout);
-      let mut graph = input.build();
-      test(&mut graph).ok();
-      graph.viz().save_svg_with_layout(dir.with_extension("svg"), self.layout);
-      eprintln!("{}", reason.message());
-    }
 
     match result {
       Err(Abort(reason)) => {
         panic!("test aborted: {}", reason.message());
       }
-      Err(Fail(reason, _)) => {
+      Err(Fail(reason, (input, ans))) => {
+        std::fs::create_dir_all(self.output_svg.parent().unwrap()).unwrap();
+        input.save_to_file(&self.input_graph);
+        input.save_svg_with_layout(&self.input_svg, self.layout);
+        std::fs::write(&self.input_meta, serde_json::to_string(&ans).unwrap());
+        let mut graph = input.build();
+        test(&mut graph, ans).ok();
+        graph.viz().save_svg_with_layout(&self.output_svg, self.layout);
+
+        eprintln!("{}", reason.message());
         panic!("test case failure");
       }
       Ok(()) => {}
     }
   }
 
+  pub fn debug(&self, test: impl Fn(&mut Graph) -> TestCaseResult) {
+    self.debug_with_answer(|g, _ : NulInputMeta| test(g))
+  }
 
-  pub fn debug(id: &str, test: fn(&mut Graph) -> TestCaseResult) {
-    let mut path = test_output_dir().join("failures");
-    path.push(id);
-    path.set_extension("txt");
-    let input = GraphSpec::load_from_file(path).pretty_unwrap();
+  pub fn debug_with_answer<'a, T: DeserializeOwned>(&self, test: impl Fn(&mut Graph, T) -> TestCaseResult) {
+    let input = GraphSpec::load_from_file(&self.input_svg).pretty_unwrap();
+    let ans_json = std::fs::read_to_string(&self.input_meta).unwrap();
+    let ans = serde_json::from_str(&ans_json).unwrap();
+
     let mut graph = input.build();
 
-    match test(&mut graph) {
+    match test(&mut graph, ans) {
       Err(TestCaseError::Reject(reason)) => {
         unreachable!()
       }
@@ -181,6 +209,13 @@ macro_rules! graph_tests {
 
 #[macro_export]
 macro_rules! graph_test_dbg {
+      ($m:path; $test:ident (ans)) => {
+        #[test]
+        fn dbg() {
+          GraphTestRunner::debug(stringify!($test), <$m>::$test)
+        }
+      };
+
       ($m:path; $test:ident) => {
         #[test]
         fn dbg() {

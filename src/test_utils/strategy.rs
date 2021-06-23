@@ -8,6 +8,26 @@ use proptest::test_runner::TestRunner;
 use crate::test_utils::SccGraphConn;
 use crate::viz::GraphViz;
 use std::fmt::Debug;
+use std::cmp::min;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SccKind {
+  Feasible,
+  InfEdge,
+  InfBound,
+}
+
+impl SccKind {
+  pub fn feasible(&self) -> bool { matches!(self, SccKind::Feasible) }
+
+  pub fn any() -> impl Strategy<Value=Self> {
+    prop_oneof![
+      Just(SccKind::Feasible),
+      Just(SccKind::InfEdge),
+      Just(SccKind::InfBound),
+    ]
+  }
+}
 
 
 #[derive(Debug)]
@@ -31,7 +51,7 @@ pub fn node(bounds: impl Strategy<Value=(Weight, Weight)> + Clone, obj: impl Str
 }
 
 pub fn default_nodes() -> impl Strategy<Value=NodeData> + Clone {
-  Just(NodeData{ lb: 0, ub: 1, obj: 0 })
+  Just(NodeData { lb: 0, ub: 1, obj: 0 })
 }
 
 pub fn graph(
@@ -103,59 +123,84 @@ pub fn scc_graph_conn() -> impl Strategy<Value=SccGraphConn> {
 
 pub fn scc_graph(
   size: usize,
-  nodes: impl Strategy<Value=NodeData> + Clone,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
+  feas: SccKind,
 ) -> impl Strategy<Value=GraphSpec> {
-  (scc_graph_conn()).prop_flat_map(move |conn| {
-    graph(size, conn, nodes.clone(), edge_weights.clone())
-  })
-}
 
-pub fn feasible_scc(size: usize, scc_bounds: (Weight, Weight)) -> impl Strategy<Value=GraphSpec> {
-  let (lb, ub) = scc_bounds;
-  scc_graph(
-    size,
-    node((MIN_WEIGHT..=lb, ub..=MAX_WEIGHT), Just(0)),
-    Just(0),
-  )
-}
+  let nodes = match feas {
+    SccKind::Feasible | SccKind::InfEdge =>
+      node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
+    SccKind::InfBound =>
+      node((MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT), Just(0)),
+  };
+  let edge_weights = match feas {
+    SccKind::Feasible | SccKind::InfBound =>
+      0..=0,
+    SccKind::InfEdge =>
+      0..=MAX_EDGE_WEIGHT,
+  };
 
-pub fn cycle_bound_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
-  scc_graph(
-    size,
-    node((MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT), Just(0)),
-    Just(0),
-  ).prop_map(|mut graph| {
-    let min_ub_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].ub).unwrap();
-    let max_lb_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].lb).unwrap();
-
-    let lb = graph.nodes[max_lb_node].lb;
-    let ub = graph.nodes[min_ub_node].ub;
-    if lb <= ub {
-      graph.nodes[max_lb_node].lb = ub;
-      graph.nodes[min_ub_node].ub = lb;
-    }
-    graph
-  })
-}
-
-pub fn cycle_edge_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
-  scc_graph(
-    size,
-    node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
-    MIN_WEIGHT..=MAX_WEIGHT,
-  ).prop_map(|mut graph| {
-    let mut last_edge = None;
-    for (_, w) in graph.edges.iter_mut() {
-      if w != &0 {
-        return graph;
+  scc_graph_conn()
+    .prop_flat_map(move |conn| {
+      graph(size, conn, nodes.clone(), edge_weights.clone())
+    })
+    .prop_map(move |mut g| {
+      match feas {
+        SccKind::InfEdge => {
+          if g.edges.values().all(|w| w == &0) {
+            *g.edges.values_mut().next().unwrap() = 1;
+          }
+        },
+        SccKind::InfBound => {
+          let max_lb = g.nodes.iter().map(|n| n.lb).max().unwrap();
+          let min_ub = g.nodes.iter().map(|n| n.ub).min().unwrap();
+          if max_lb <= min_ub {
+            g.nodes.first_mut().unwrap().lb = min_ub + 1;
+          }
+        }
+        SccKind::Feasible => {},
       }
-      last_edge = Some(w);
-    }
-    *last_edge.expect("at least one edge") = 0;
-    graph
-  })
+      g
+    })
 }
+
+//
+// pub fn cycle_bound_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
+//   scc_graph(
+//     size,
+//     node((MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT), Just(0)),
+//     Just(0),
+//   ).prop_map(|mut graph| {
+//     let min_ub_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].ub).unwrap();
+//     let max_lb_node = (0..graph.nodes.len()).min_by_key(|&n| graph.nodes[n].lb).unwrap();
+//
+//     let lb = graph.nodes[max_lb_node].lb;
+//     let ub = graph.nodes[min_ub_node].ub;
+//     if lb <= ub {
+//       graph.nodes[max_lb_node].lb = ub;
+//       graph.nodes[min_ub_node].ub = lb;
+//     }
+//     graph
+//   })
+// }
+//
+// pub fn cycle_edge_infeasible_scc(size: usize) -> impl Strategy<Value=GraphSpec> {
+//   scc_graph(
+//     size,
+//     node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
+//     MIN_WEIGHT..=MAX_WEIGHT,
+//   ).prop_map(|mut graph| {
+//     let mut last_edge = None;
+//     for (_, w) in graph.edges.iter_mut() {
+//       if w != &0 {
+//         return graph;
+//       }
+//       last_edge = Some(w);
+//     }
+//     *last_edge.expect("at least one edge") = 0;
+//     graph
+//   })
+// }
+
 
 pub fn set_arbitrary_edge_to_one(graph: impl Strategy<Value=GraphSpec>) -> impl Strategy<Value=GraphSpec> {
   (graph, any::<prop::sample::Selector>())

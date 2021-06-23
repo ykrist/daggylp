@@ -1,6 +1,36 @@
 use super::graph::*;
 use fnv::FnvHashSet;
 
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Mrs {
+  pub(crate) vars: Vec<Var>,
+  pub(crate) constrs: Vec<Constraint>,
+}
+
+impl Mrs {
+  pub(crate) fn new_with_root(root: Var) -> Self {
+    let vars = vec![root];
+    let constrs = vec![Constraint::Lb(root)];
+    Mrs { vars, constrs }
+  }
+
+  pub(crate) fn new_empty() -> Self {
+    Mrs { vars: Vec::default(), constrs: Vec::default() }
+  }
+
+  pub(crate) fn add_var(&mut self, var: Var) {
+    debug_assert!(!self.vars.contains(&var));
+    self.vars.push(var);
+  }
+
+  pub(crate) fn add_constraint(&mut self, c: Constraint) {
+    debug_assert!(!self.constrs.contains(&c));
+    self.constrs.push(c);
+  }
+}
+
+
 /// Recursive helper function.  For a node n with an active predecessor p, will add the variable on n and the constraint on the active
 /// edge to the same MRS as `p`.  Returns the MRS index for the predecessor.
 fn add_edge_to_mrs(graph: &Graph, n: usize, mrs_list: &mut Vec<Mrs>, mrs_index: &mut [Option<usize>]) -> usize {
