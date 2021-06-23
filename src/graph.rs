@@ -273,7 +273,7 @@ impl Graph {
 
   pub fn add_constr(&mut self, lhs: Var, d: Weight, rhs: Var) {
     assert!(d >= 0);
-    assert!(lhs != rhs);
+    assert!(lhs != rhs, "Variables must be different");
     let e = Edge {
       from: lhs.node,
       to: rhs.node,

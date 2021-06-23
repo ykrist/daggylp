@@ -12,6 +12,38 @@ pub struct SccInfo {
   pub scc_node: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BoundInfeas {
+  pub ub_node: usize,
+  pub ub: Weight,
+  pub lb_node: usize,
+  pub lb: Weight,
+}
+
+impl BoundInfeas {
+  #[inline]
+  fn new(n: usize, node: &Node) -> Self {
+    BoundInfeas {
+      ub: node.ub,
+      lb: node.lb,
+      lb_node: n,
+      ub_node: n,
+    }
+  }
+
+  #[inline]
+  fn update(&mut self, n: usize, node: &Node) {
+    if self.lb < node.lb {
+      self.lb = node.lb;
+      self.lb_node = n;
+    }
+    if self.ub > node.ub {
+      self.ub = node.ub;
+      self.ub_node = n;
+    }
+  }
+}
+
 impl Graph {
 
   /// Find all Strongly-Connected Components with 2 or more nodes
@@ -83,6 +115,31 @@ impl Graph {
     sccs
   }
 
+  /// Returns a bound infeasibility if one exists.  If `extrema = true`, finds the greatest violation (min UB, max LB)
+  /// Returns None if SCC is feasible.
+  pub(crate) fn find_scc_bound_infeas(&self, scc: impl IntoIterator<Item=usize>, extrema: bool) -> Option<BoundInfeas> {
+    let mut nodes = scc.into_iter().map(|n| (n, &self.nodes[n]));
+    let (n, first_node) = nodes.next().expect("expected non-empty iterator");
+    let mut bi = BoundInfeas::new(n, first_node);
+
+    if extrema {
+      nodes.for_each(|(n, node)| bi.update(n, node));
+    } else {
+      for (n, node) in nodes {
+        if bi.ub < bi.lb { return Some(bi) }
+        bi.update(n, node);
+      }
+    }
+
+    if bi.ub < bi.lb {
+      Some(bi)
+    } else {
+      None
+    }
+  }
+
+
+  // TODO: make this return the scc kind
   pub(crate) fn scc_is_feasible(&self, scc: &FnvHashSet<usize>) -> bool {
     for &n in scc {
       for e in &self.edges_from[n] {
@@ -92,7 +149,7 @@ impl Graph {
       }
     }
 
-    self.find_scc_bound_infeas(scc.iter().copied()).is_none()
+    self.find_scc_bound_infeas(scc.iter().copied(), false).is_none()
   }
 
   pub(crate) fn condense(&mut self, sccs: Vec<FnvHashSet<usize>>) {
@@ -185,5 +242,62 @@ impl Graph {
       self.edges_to[to].push(e);
     }
   }
+}
 
+#[cfg(test)]
+mod tests {
+  #[macro_use]
+  use crate::*;
+  use crate::test_utils::*;
+  use crate::test_utils::strategy::*;
+  use proptest::prelude::*;
+  use serde::{Serialize, Deserialize};
+  use fnv::FnvHashMap;
+  use crate::graph::Graph;
+  use proptest::test_runner::TestCaseResult;
+  use crate::viz::LayoutAlgo;
+
+  #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+  struct SccSizes(FnvHashMap<usize, usize>);
+
+  fn multi_scc_graph() -> impl Strategy<Value=(GraphSpec, SccSizes)> {
+    let scc = (2..=12usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
+    prop::collection::vec(scc, 4..10)
+      .prop_map(|sccs| {
+        let mut size_counts = FnvHashMap::default();
+        for g in &sccs {
+          size_counts.entry(g.nodes.len()).and_modify(|c| *c += 1).or_insert(1);
+        }
+        let conn = (1..sccs.len()).map(|child_scc| {
+          let parent_scc = (child_scc - 1) / 2;
+          let conn : Box<dyn Connectivity> = Box::new(AllEdges());
+          let weights : Box<dyn EdgeWeights> = Box::new(AllSame(1));
+          dbg!((child_scc, parent_scc));
+          (child_scc, parent_scc, conn, weights)
+        }).collect();
+
+        (GraphSpec::from_components(sccs, conn), SccSizes(size_counts))
+      })
+  }
+
+  struct Tests;
+  impl Tests {
+    fn scc_sizes(g: &mut Graph, sizes: SccSizes) -> TestCaseResult {
+      let sccs = g.find_sccs();
+      let mut actual_sizes = FnvHashMap::default();
+      for scc in &sccs {
+        actual_sizes.entry(scc.len()).and_modify(|c| *c+=1).or_insert(1);
+      };
+      let actual_sizes = SccSizes(actual_sizes);
+      prop_assert_eq!(actual_sizes, sizes);
+      Ok(())
+    }
+  }
+
+  graph_test_dbg!(Tests; scc_sizes _);
+
+  graph_tests!{
+    Tests;
+    multi_scc_graph() => scc_sizes [layout=LayoutAlgo::Fdp];
+  }
 }

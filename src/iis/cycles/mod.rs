@@ -4,7 +4,7 @@ use crate::{set_with_capacity, Error, map_with_capacity};
 use std::iter::once;
 use std::collections::VecDeque;
 use crate::iis::Iis;
-use crate::scc::SccInfo;
+use crate::scc::{BoundInfeas, SccInfo};
 
 mod enumeration;
 mod shortest_path;
@@ -14,7 +14,7 @@ pub use shortest_path::ShortestPathAlg;
 enum CyclicInfKind {
   Pure,
   Unknown,
-  Bounds { lb: usize, ub: usize },
+  Bounds(BoundInfeas),
 }
 
 
@@ -26,34 +26,6 @@ trait FindCyclicIis<A> {
 }
 
 impl Graph {
-  /// Returns a two node-bound pairs in an SCC, (n1, lb), (n2, ub) such that ub < lb, if such a pair exists.
-  pub(crate) fn find_scc_bound_infeas(&self, scc: impl Iterator<Item=usize>) -> Option<((usize, Weight), (usize, Weight))> {
-    let mut nodes = scc.map(|n| (n, &self.nodes[n]));
-
-    let (n, first_node) = nodes.next().expect("expected non-empty iterator");
-    let mut min_ub_node = n;
-    let mut min_ub = first_node.ub;
-    let mut max_lb_node = n;
-    let mut max_lb = first_node.lb;
-
-    for (n, node) in nodes {
-      if max_lb < node.lb {
-        max_lb = node.lb;
-        max_lb_node = n;
-      }
-      if min_ub > node.ub {
-        min_ub = node.ub;
-        min_ub_node = n;
-      }
-      if min_ub < max_lb {
-        return Some(((max_lb_node, max_lb), (min_ub_node, min_ub)));
-      }
-    }
-
-    None
-  }
-
-
   pub(crate) fn compute_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
     // use shortest_path::ShortestPath;
     if self.parameters.minimal_cyclic_iis {

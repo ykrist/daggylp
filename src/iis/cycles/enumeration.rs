@@ -221,9 +221,9 @@ impl<'a, I> Iterator for CyclicIisIter<'a, I>
           let mut iis = Iis::from_cycle(cycle.iter().map(|n| self.graph.var_from_node_id(*n)));
           match kind {
             CyclicInfKind::Pure => {}
-            CyclicInfKind::Bounds { lb, ub } => {
-              iis.add_constraint(Constraint::Ub(self.graph.var_from_node_id(ub)));
-              iis.add_constraint(Constraint::Lb(self.graph.var_from_node_id(lb)));
+            CyclicInfKind::Bounds(bi) => {
+              iis.add_constraint(Constraint::Ub(self.graph.var_from_node_id(bi.ub_node)));
+              iis.add_constraint(Constraint::Lb(self.graph.var_from_node_id(bi.lb_node)));
             }
             CyclicInfKind::Unknown => unreachable!(),
           }
@@ -294,8 +294,8 @@ impl Graph {
     if self.cycle_edges(nodes).any(|e| e.weight != 0) {
       return Some(CyclicInfKind::Pure);
     }
-    if let Some(((lb, _), (ub, _))) = self.find_scc_bound_infeas(nodes.iter().copied()) {
-      return Some(CyclicInfKind::Bounds { lb, ub });
+    if let Some(bi) = self.find_scc_bound_infeas(nodes.iter().copied(), false) {
+      return Some(CyclicInfKind::Bounds(bi));
     }
     return None;
   }

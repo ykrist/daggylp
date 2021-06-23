@@ -188,6 +188,15 @@ pub trait Connectivity {
   }
 }
 
+
+#[derive(Debug, Copy, Clone)]
+pub struct NoEdges();
+
+impl Connectivity for NoEdges {
+  fn connected(&mut self, _: usize, _: usize) -> bool { false }
+}
+
+
 #[derive(Debug, Copy, Clone)]
 pub struct AllEdges();
 
@@ -291,32 +300,21 @@ impl<E: Connectivity, F: FnMut(usize, usize) -> bool> Connectivity for MaskEdges
 
 
 pub trait EdgeWeights {
-  fn set_size(&mut self, _nodes: usize, _edges: usize) {}
-
   fn weight(&mut self, from: usize, to: usize) -> Weight;
+
+  fn set_size(&mut self, _nodes: usize, _edges: usize) {}
 
   fn map<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F> where Self: Sized {
     MapWeights { orig: self, map }
   }
-
-  fn mask<F: FnMut(usize, usize) -> bool>(self, mask: F) -> MaskEdges<Self, F> where Self: Sized {
-    MaskEdges { orig: self, mask }
-  }
 }
 
-pub trait NodeSpec {
-  fn lb(&mut self, _: usize) -> Option<Weight> { None }
+pub struct AllSame(pub Weight);
 
-  fn ub(&mut self, _: usize) -> Option<Weight> { None }
-
-  fn obj(&mut self, _: usize) -> Option<Weight> { None }
-
-  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N> where Self: Sized {
-    CombinedNodeSpec { first: self, second: other }
-  }
-
-  fn set_num_nodes(&mut self, _: usize) {}
+impl EdgeWeights for AllSame {
+  fn weight(&mut self, _: usize, _: usize) -> Weight { self.0 }
 }
+
 
 pub struct MapWeights<E, F> {
   orig: E,
@@ -334,10 +332,18 @@ impl<E: EdgeWeights, F: FnMut(usize, usize, Weight) -> Weight> EdgeWeights for M
 }
 
 
-pub struct NoEdges();
+pub trait NodeSpec {
+  fn lb(&mut self, _: usize) -> Option<Weight> { None }
 
-impl Connectivity for NoEdges {
-  fn connected(&mut self, _: usize, _: usize) -> bool { false }
+  fn ub(&mut self, _: usize) -> Option<Weight> { None }
+
+  fn obj(&mut self, _: usize) -> Option<Weight> { None }
+
+  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N> where Self: Sized {
+    CombinedNodeSpec { first: self, second: other }
+  }
+
+  fn set_num_nodes(&mut self, _: usize) {}
 }
 
 pub struct CombinedNodeSpec<A, B> {

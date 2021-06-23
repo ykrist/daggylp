@@ -14,6 +14,7 @@ use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailur
 use proptest::prelude::*;
 use std::path::{PathBuf, Path};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use crate::test_utils::strategy::SccKind;
 
 pub(crate) fn test_input_dir() -> &'static Path {
   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
@@ -56,8 +57,58 @@ pub struct GraphTestRunner {
 
 type GraphTestResult = std::result::Result<(), String>;
 
-#[derive(Deserialize, Serialize, Copy, Clone, Debug)]
-struct NulInputMeta;
+
+pub trait TestInput: Sized {
+  type Meta;
+  type TestFunction;
+
+  fn save_meta(&self, path: impl AsRef<Path>);
+
+  fn load_meta(g: GraphSpec, path: impl AsRef<Path>) -> Self;
+
+  fn split(self) -> (GraphSpec, Self::Meta);
+
+  fn run_test(test: &Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult;
+}
+
+
+impl TestInput for GraphSpec {
+  type Meta = ();
+  type TestFunction = fn(&mut Graph) -> TestCaseResult;
+
+  fn save_meta(&self, _: impl AsRef<Path>) {}
+
+  fn load_meta(g: GraphSpec, _: impl AsRef<Path>) -> Self { g }
+
+  fn split(self) -> (GraphSpec, Self::Meta) {
+    (self, ())
+  }
+
+  fn run_test(test: &Self::TestFunction, input: (&mut Graph, ())) -> TestCaseResult {
+    (test)(input.0)
+  }
+}
+
+impl<M: Serialize + DeserializeOwned> TestInput for (GraphSpec, M) {
+  type Meta = M;
+  type TestFunction = fn(&mut Graph, M) -> TestCaseResult;
+
+  fn save_meta(&self, path: impl AsRef<Path>) {
+    std::fs::write(path, serde_json::to_string_pretty(&self.1).unwrap()).unwrap();
+  }
+
+  fn load_meta(g: GraphSpec, path: impl AsRef<Path>) -> Self {
+    (g, serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap())
+  }
+
+  fn split(self) -> (GraphSpec, Self::Meta) {
+    self
+  }
+
+  fn run_test(test: &Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult {
+    (test)(input.0, input.1)
+  }
+}
 
 
 impl GraphTestRunner {
@@ -67,6 +118,7 @@ impl GraphTestRunner {
 
     let mut config = ProptestConfig::with_cases(1000);
     config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
+    // TODO keep track of regressions ourselves, since we have a unified input format
     config.result_cache = prop::test_runner::basic_result_cache;
 
     let mut path = test_output_dir().join("failures");
@@ -95,16 +147,17 @@ impl GraphTestRunner {
     Self::new_with_layout_prog(id, LayoutAlgo::Dot)
   }
 
-  pub fn run(&self, inputs: impl Strategy<Value=(GraphSpec)>, test: impl Fn(&mut Graph) -> TestCaseResult) {
-    self.run_with_answer(inputs.prop_map(|g| (g, NulInputMeta)), move |g, _| test(g))
-  }
-
-  pub fn run_with_answer<T: Serialize>(&self, inputs: impl Strategy<Value=(GraphSpec, T)>, test: impl Fn(&mut Graph, T) -> TestCaseResult) {
+  pub fn run<V, S>(&self, strategy: S, test: V::TestFunction)
+    where
+      V: TestInput,
+      S: Strategy<Value=V>,
+  {
     use TestError::*;
     let mut runner = prop::test_runner::TestRunner::new(self.config.clone());
-    let result = runner.run(&inputs, |(g, ans)| {
-      let mut g = g.build();
-      test(&mut g, ans)
+    let result = runner.run(&strategy, |input| {
+      let (mut graph_spec, meta) = input.split();
+      let mut g = graph_spec.build();
+      V::run_test(&test, (&mut g, meta))
     });
 
 
@@ -112,15 +165,15 @@ impl GraphTestRunner {
       Err(Abort(reason)) => {
         panic!("test aborted: {}", reason.message());
       }
-      Err(Fail(reason, (input, ans))) => {
+      Err(Fail(reason, input)) => {
         std::fs::create_dir_all(self.output_svg.parent().unwrap()).unwrap();
+        input.save_meta(&self.input_meta);
+        let (input, meta) = input.split();
         input.save_to_file(&self.input_graph);
         input.save_svg_with_layout(&self.input_svg, self.layout);
-        std::fs::write(&self.input_meta, serde_json::to_string(&ans).unwrap());
         let mut graph = input.build();
-        test(&mut graph, ans).ok();
+        V::run_test(&test, (&mut graph, meta)).ok();
         graph.viz().save_svg_with_layout(&self.output_svg, self.layout);
-
         eprintln!("{}", reason.message());
         panic!("test case failure");
       }
@@ -128,18 +181,16 @@ impl GraphTestRunner {
     }
   }
 
-  pub fn debug(&self, test: impl Fn(&mut Graph) -> TestCaseResult) {
-    self.debug_with_answer(|g, _ : NulInputMeta| test(g))
-  }
 
-  pub fn debug_with_answer<'a, T: DeserializeOwned>(&self, test: impl Fn(&mut Graph, T) -> TestCaseResult) {
-    let input = GraphSpec::load_from_file(&self.input_svg).pretty_unwrap();
-    let ans_json = std::fs::read_to_string(&self.input_meta).unwrap();
-    let ans = serde_json::from_str(&ans_json).unwrap();
-
+  pub fn debug<V>(&self, test: V::TestFunction)
+    where
+      V: TestInput,
+  {
+    let input = GraphSpec::load_from_file(&self.input_graph).pretty_unwrap();
+    let (input, meta) = V::load_meta(input, &self.input_meta).split();
     let mut graph = input.build();
 
-    match test(&mut graph, ans) {
+    match V::run_test(&test, (&mut graph, meta)) {
       Err(TestCaseError::Reject(reason)) => {
         unreachable!()
       }
@@ -158,6 +209,7 @@ impl GraphTestRunner {
     self.config.cases = n;
   }
 }
+
 
 #[macro_export]
 macro_rules! test_case_fail {
@@ -209,17 +261,18 @@ macro_rules! graph_tests {
 
 #[macro_export]
 macro_rules! graph_test_dbg {
-      ($m:path; $test:ident (ans)) => {
-        #[test]
-        fn dbg() {
-          GraphTestRunner::debug(stringify!($test), <$m>::$test)
-        }
+      ($m:path; $test:ident) => {
+        graph_test_dbg!($m; $test crate::test_utils::GraphSpec);
       };
 
-      ($m:path; $test:ident) => {
+      ($m:path; $test:ident _) => {
+        graph_test_dbg!($m; $test (crate::test_utils::GraphSpec, _));
+      };
+
+      ($m:path; $test:ident $t:ty) => {
         #[test]
         fn dbg() {
-          GraphTestRunner::debug(stringify!($test), <$m>::$test)
+          GraphTestRunner::new(stringify!($test)).debug::<$t>(<$m>::$test);
         }
       };
   }

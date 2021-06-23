@@ -275,7 +275,7 @@ impl Graph {
             labels.insert(w, Queued);
             queue.push_back(Node { dist_from_src: new_dist_from_src, node: w, pred: v });
           }
-          Some(_) => {},
+          Some(_) => {}
         }
       }
       labels.insert(v, v_label);
@@ -329,21 +329,22 @@ impl Graph {
 
   /// Try to find an IIS which consists an Upper bound, Lower bound and edge-constraints (constraints `t[i] + d[i,j] <= t[j]`)
   fn find_cycle_bound_iis(&self, scc: &FnvHashSet<usize>) -> Option<Iis> {
-    if let Some(((lb_node, _), (ub_node, _))) = self.find_scc_bound_infeas(scc.iter().copied()) {
-      let p1 = self.shortest_path_scc::<ForwardDir, _>(scc, lb_node, once(ub_node), Prune::BestDest).unwrap();
-      let p2 = self.shortest_path_scc::<BackwardDir, _>(scc, lb_node, once(ub_node), Prune::BestDest).unwrap();
+    self.find_scc_bound_infeas(scc.iter().copied(), false).map(|bi| {
+      let src = bi.lb_node;
+      let dest = bi.ub_node;
 
-      let mut iis = Iis::with_capacity(p1.num_edges(ub_node) + p2.num_edges(ub_node) /* - 1 - 1 + 2 */);
+      let p1 = self.shortest_path_scc::<ForwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
+      let p2 = self.shortest_path_scc::<BackwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
+
+      let mut iis = Iis::with_capacity(p1.num_edges(dest) + p2.num_edges(dest) /* - 1 - 1 + 2 */);
 
       // p1.iter_nodes(): ub_node <- ... <- lb_node
-      iis.add_backwards_path(p1.iter_nodes(ub_node).map(|n| self.var_from_node_id(n)), true);
+      iis.add_backwards_path(p1.iter_nodes(dest).map(|n| self.var_from_node_id(n)), true);
       // p2.iter_nodes(): ub_node -> ... -> lb_node
-      iis.add_forwards_path(p2.iter_nodes(ub_node).map(|n| self.var_from_node_id(n)), false);
+      iis.add_forwards_path(p2.iter_nodes(dest).map(|n| self.var_from_node_id(n)), false);
       debug_assert_eq!(iis.constrs.capacity(), iis.constrs.len());
-      Some(iis)
-    } else {
-      None
-    }
+      iis
+    })
   }
 
   /// Try to find the *smallest* IIS which consists an Upper bound, Lower bound and edge-constraints (constraints `t[i] + d[i,j] <= t[j]`)
@@ -364,7 +365,7 @@ impl Graph {
 
     for src in src_nodes {
       let lb = self.nodes[src].lb;
-      if lb <= min_ub { continue }
+      if lb <= min_ub { continue; }
       dests.extend(scc.iter().copied().filter(|&n| self.nodes[n].ub < lb));
 
       let paths_there = self.shortest_path_scc::<ForwardDir, _>(scc, src, dests.iter().copied(), global_path_prune);
@@ -419,7 +420,7 @@ mod tests {
       // have any lonely nodes (otherwise we don't have a SCC graph)
       let last_node = size - 1;
       let rank = inverse_triangular_number(last_node);
-      if last_node < triangular_number(rank - 1) + 2   {
+      if last_node < triangular_number(rank - 1) + 2 {
         size += 1;
       }
       set_arbitrary_edge_to_one(graph(size, Triangular(), default_nodes(), Just(0)))
@@ -429,7 +430,7 @@ mod tests {
   fn cbi_triangular_graph() -> impl Strategy<Value=GraphSpec> {
     (1..=13usize).prop_flat_map(|mut rank| {
       let size = triangular_number(rank) + 1;
-      graph(size, Triangular(), Just(NodeData{ lb: 0, ub: 4, obj: 0}), Just(0))
+      graph(size, Triangular(), Just(NodeData { lb: 0, ub: 4, obj: 0 }), Just(0))
     })
       .prop_map(|mut g| {
         g.nodes.last_mut().unwrap().lb = 2;
@@ -457,7 +458,7 @@ mod tests {
     fn cbi_triangular_graph_iis_size(g: &mut Graph) -> TestCaseResult {
       let t = std::time::Instant::now();
 
-      let iis_size= 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
+      let iis_size = 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
       g.solve();
       println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       let (sccs, first_inf_scc) = match &g.state {
@@ -473,7 +474,7 @@ mod tests {
       prop_assert_eq!(no_iis, None);
       let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
       match iis2 {
-        Some(iis2) =>prop_assert_eq!(iis2.len(), iis.len()),
+        Some(iis2) => prop_assert_eq!(iis2.len(), iis.len()),
         None => test_case_bail!("no iis found")
       }
 
