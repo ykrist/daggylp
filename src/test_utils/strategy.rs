@@ -61,7 +61,6 @@ pub fn graph(
   edge_weights: impl Strategy<Value=Weight> + Clone,
 ) -> impl Strategy<Value=GraphSpec>
 {
-  dbg!(size);
   assert!(size > 0);
   conn.set_size(size, size * (size - 1));
   let nodes = vec![nodes; size];
@@ -113,11 +112,12 @@ pub fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone
                                                (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
 }
 
-pub fn scc_graph_conn() -> impl Strategy<Value=SccGraphConn> {
+pub fn scc_graph_conn(size: usize) -> impl Strategy<Value=SccGraphConn> {
+  let w = if triangular_graph_is_strongly_connected(size) { 1 } else { 0 };
   prop_oneof![
-    Just(SccGraphConn::Cycle(Cycle::new())),
-    Just(SccGraphConn::Tri(Triangular())),
-    Just(SccGraphConn::Complete(AllEdges())),
+    3 => Just(SccGraphConn::Cycle(Cycle::new())),
+    w => Just(SccGraphConn::Tri(Triangular())),
+    0 => Just(SccGraphConn::Complete(AllEdges())),
   ]
 }
 
@@ -139,7 +139,7 @@ pub fn scc_graph(
       0..=MAX_EDGE_WEIGHT,
   };
 
-  scc_graph_conn()
+  scc_graph_conn(size)
     .prop_flat_map(move |conn| {
       graph(size, conn, nodes.clone(), edge_weights.clone())
     })

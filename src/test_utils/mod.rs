@@ -153,7 +153,8 @@ impl GraphTestRunner {
       S: Strategy<Value=V>,
   {
     use TestError::*;
-    let mut runner = prop::test_runner::TestRunner::new(self.config.clone());
+    // let mut runner = prop::test_runner::TestRunner::new(self.config.clone());
+    let mut runner = prop::test_runner::TestRunner::new_with_rng(self.config.clone(), prop::test_runner::TestRng::deterministic_rng(self.config.rng_algorithm));
     let result = runner.run(&strategy, |input| {
       let (mut graph_spec, meta) = input.split();
       let mut g = graph_spec.build();

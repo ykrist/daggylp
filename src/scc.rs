@@ -252,49 +252,48 @@ mod tests {
   use crate::test_utils::strategy::*;
   use proptest::prelude::*;
   use serde::{Serialize, Deserialize};
-  use fnv::FnvHashMap;
   use crate::graph::Graph;
   use proptest::test_runner::TestCaseResult;
   use crate::viz::LayoutAlgo;
 
   #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-  struct SccSizes(FnvHashMap<usize, usize>);
+  struct SccSizeOrder(Vec<usize>);
 
-  fn multi_scc_graph() -> impl Strategy<Value=(GraphSpec, SccSizes)> {
-    let scc = (2..=12usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
-    prop::collection::vec(scc, 4..10)
+  impl SccSizeOrder {
+    fn sorted(&self) -> Vec<usize> {
+      let mut v = self.0.clone();
+      v.sort();
+      v
+    }
+  }
+
+  fn multi_scc_graph() -> impl Strategy<Value=(GraphSpec, SccSizeOrder)> {
+    let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
+    prop::collection::vec(scc, 1..=50)
       .prop_map(|sccs| {
-        let mut size_counts = FnvHashMap::default();
-        for g in &sccs {
-          size_counts.entry(g.nodes.len()).and_modify(|c| *c += 1).or_insert(1);
-        }
+        let sizes = SccSizeOrder(sccs.iter().map(|g| g.nodes.len()).collect());
         let conn = (1..sccs.len()).map(|child_scc| {
           let parent_scc = (child_scc - 1) / 2;
           let conn : Box<dyn Connectivity> = Box::new(AllEdges());
           let weights : Box<dyn EdgeWeights> = Box::new(AllSame(1));
-          dbg!((child_scc, parent_scc));
           (child_scc, parent_scc, conn, weights)
         }).collect();
-
-        (GraphSpec::from_components(sccs, conn), SccSizes(size_counts))
+        let sz : Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
+        (GraphSpec::from_components(sccs, conn), sizes)
       })
   }
 
   struct Tests;
   impl Tests {
-    fn scc_sizes(g: &mut Graph, sizes: SccSizes) -> TestCaseResult {
+    fn scc_sizes(g: &mut Graph, actual_sizes: SccSizeOrder) -> TestCaseResult {
       let sccs = g.find_sccs();
-      let mut actual_sizes = FnvHashMap::default();
-      for scc in &sccs {
-        actual_sizes.entry(scc.len()).and_modify(|c| *c+=1).or_insert(1);
-      };
-      let actual_sizes = SccSizes(actual_sizes);
-      prop_assert_eq!(actual_sizes, sizes);
+      let sizes = SccSizeOrder(sccs.iter().map(|l| l.len()).collect());
+      println!("SCCS found: {:?}", sccs);
+      println!("actual {:?}", &actual_sizes);
+      prop_assert_eq!(sizes.sorted(), actual_sizes.sorted());
       Ok(())
     }
   }
-
-  graph_test_dbg!(Tests; scc_sizes _);
 
   graph_tests!{
     Tests;

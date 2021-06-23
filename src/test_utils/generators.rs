@@ -148,13 +148,13 @@ impl GraphSpec {
 
     let mut g = subgraphs.next().expect("at least one graph");
     g.nodes.reserve(subgraph_size[1..].iter().copied().sum());
-
-    for (&offset, h) in subgraph_size[1..].iter().zip(subgraphs) {
+    for (&offset, h) in offsets[1..].iter().zip(subgraphs) {
       g.nodes.extend_from_slice(&h.nodes);
       g.edges.extend(h.edges.into_iter().map(|((i, j), w)| ((i + offset, j + offset), w)));
     }
 
     for (sg_i, sg_j, mut conn, mut weights) in conn {
+      assert_ne!(sg_i, sg_j);
       let ij_nodes = subgraph_size[sg_i] + subgraph_size[sg_j];
       let ij_edges = subgraph_size[sg_i] * subgraph_size[sg_j];
       conn.set_size(ij_nodes, ij_edges);
@@ -164,7 +164,7 @@ impl GraphSpec {
         let ni = i + offsets[sg_i];
         for j in 0..subgraph_size[sg_j] {
           if conn.connected(i, j) {
-            let nj = j + offsets[sg_i];
+            let nj = j + offsets[sg_j];
             g.edges.insert((ni, nj), weights.weight(i, j));
           }
         }
@@ -225,7 +225,7 @@ impl Connectivity for Cycle {
 ///          1 2     rank = 1
 ///         3 4 5    rank = 2
 ///        6 7 8 9   rank = 3
-///       10 ...
+///       10 ...     rank = 4
 /// ```
 /// For every sub-triangle of nodes in the big triangle above,
 /// ```text
@@ -238,6 +238,14 @@ impl Connectivity for Cycle {
 ///  - downward: eg `i -> j`
 #[derive(Debug, Copy, Clone)]
 pub struct Triangular();
+
+pub fn triangular_graph_is_strongly_connected(size: usize) -> bool {
+  if size < 3 { return false }
+  let last_node = size - 1;
+  let rank = inverse_triangular_number(last_node);
+  let first_in_rank = triangular_number(rank -1 ) + 1;
+  last_node != first_in_rank
+}
 
 pub fn triangular_number(n: usize) -> usize {
   return n*(n + 3) / 2
@@ -383,4 +391,29 @@ impl NodeSpec for IdenticalNodes {
   fn lb(&mut self, _: usize) -> Option<Weight> { Some(self.lb) }
   fn ub(&mut self, _: usize) -> Option<Weight> { Some(self.ub) }
   fn obj(&mut self, _: usize) -> Option<Weight> { Some(self.obj) }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use proptest::prelude::*;
+
+  #[test]
+  fn sanity_checks() {
+    assert_eq!(triangular_graph_is_strongly_connected(3), true);
+    assert_eq!(triangular_graph_is_strongly_connected(4), false);
+    assert_eq!(triangular_graph_is_strongly_connected(6), true);
+    assert_eq!(triangular_graph_is_strongly_connected(7), false);
+    assert_eq!(inverse_triangular_number(0), 0);
+    assert_eq!(triangular_number(0), 0);
+  }
+
+  proptest! {
+    #[test]
+    fn inverse_triangular_is_actually_an_inverse(n in 0..1000_000usize) {
+      let t = triangular_number(n);
+      let m = inverse_triangular_number(t);
+      prop_assert_eq!(m, n);
+    }
+  }
 }
