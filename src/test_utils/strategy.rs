@@ -9,6 +9,7 @@ use crate::test_utils::SccGraphConn;
 use crate::viz::GraphViz;
 use std::fmt::Debug;
 use std::cmp::min;
+use crate::test_utils::SccGraphConn::Sq;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SccKind {
@@ -113,11 +114,14 @@ pub fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone
 }
 
 pub fn scc_graph_conn(size: usize) -> impl Strategy<Value=SccGraphConn> {
-  let w = if triangular_graph_is_strongly_connected(size) { 1 } else { 0 };
+  let tri = if Triangular::strongly_connected(size) { 1 } else { 0 };
+  let sq = if Square::strongly_connected(size) { 1 } else { 0 };
+  let complete = if size < 9 { 1 } else { 0 };
   prop_oneof![
     3 => Just(SccGraphConn::Cycle(Cycle::new())),
-    w => Just(SccGraphConn::Tri(Triangular())),
-    0 => Just(SccGraphConn::Complete(AllEdges())),
+    tri => Just(SccGraphConn::Tri(Triangular())),
+    sq => Just(SccGraphConn::Sq(Square::new())),
+    complete => Just(SccGraphConn::Complete(AllEdges())),
   ]
 }
 
@@ -141,6 +145,7 @@ pub fn scc_graph(
 
   scc_graph_conn(size)
     .prop_flat_map(move |conn| {
+      println!("conn = {:?}", conn);
       graph(size, conn, nodes.clone(), edge_weights.clone())
     })
     .prop_map(move |mut g| {

@@ -5,6 +5,7 @@ use proptest::option::of;
 use std::fmt;
 use std::io::Write;
 use anyhow::Context;
+use crate::test_utils::strategy::node;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NodeData {
@@ -180,6 +181,10 @@ pub trait Connectivity {
 
   fn set_size(&mut self, _nodes: usize, _edges: usize) {}
 
+  /// If a graph of this size is construct with this connectivity, is it
+  /// guaranteed to be strongly connected? Returning false is always correct.
+  fn strongly_connected(graph_size: usize) -> bool where Self: Sized { false }
+
   fn mask<F: FnMut(usize, usize) -> bool>(self, mask: F) -> MaskEdges<Self, F> where Self: Sized {
     MaskEdges {
       orig: self,
@@ -202,6 +207,8 @@ pub struct AllEdges();
 
 impl Connectivity for AllEdges {
   fn connected(&mut self, _: usize, _: usize) -> bool { true }
+
+  fn strongly_connected(_: usize) -> bool { true }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -217,6 +224,8 @@ impl Connectivity for Cycle {
   fn connected(&mut self, from: usize, to: usize) -> bool {
     (from + 1) % self.0 == to
   }
+
+  fn strongly_connected(_: usize) -> bool { true }
 }
 
 /// Assume nodes are arranged like this:
@@ -239,14 +248,6 @@ impl Connectivity for Cycle {
 #[derive(Debug, Copy, Clone)]
 pub struct Triangular();
 
-pub fn triangular_graph_is_strongly_connected(size: usize) -> bool {
-  if size < 3 { return false }
-  let last_node = size - 1;
-  let rank = inverse_triangular_number(last_node);
-  let first_in_rank = triangular_number(rank -1 ) + 1;
-  last_node != first_in_rank
-}
-
 pub fn triangular_number(n: usize) -> usize {
   return n*(n + 3) / 2
 }
@@ -255,6 +256,7 @@ pub fn inverse_triangular_number(t: usize) -> usize {
   let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
   (r - 1e-10).ceil() as usize
 }
+
 
 impl Connectivity for Triangular {
   fn connected(&mut self, from: usize, to: usize) -> bool {
@@ -265,10 +267,67 @@ impl Connectivity for Triangular {
       || (from_rank == to_rank + 1 && from == to + from_rank + 1) // upward edges
       || (from_rank + 1 == to_rank && from + to_rank == to) // downward edges
   }
+
+  fn strongly_connected(size: usize) -> bool {
+    if size < 3 { return false }
+    let last_node = size - 1;
+    let rank = inverse_triangular_number(last_node);
+    let first_in_rank = triangular_number(rank -1 ) + 1;
+    last_node != first_in_rank
+  }
+}
+
+
+pub fn square_size(n: usize) -> usize {
+  return (n as f64).sqrt().ceil() as usize
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Square(usize);
+
+impl Square {
+  pub fn new() -> Self { Square(0) }
+
+  fn row_col(&self, n: usize) -> (usize, usize) {
+    let row = n / self.0;
+    let col = n - row * self.0;
+    (row, col)
+  }
+}
+
+impl Connectivity for Square {
+  fn set_size(&mut self, nodes: usize, _: usize) {
+    self.0 = square_size(nodes)
+  }
+
+  fn connected(&mut self, from: usize, to: usize) -> bool {
+    let (row_from,col_from) = self.row_col(from);
+    let (row_to, col_to) = self.row_col(to);
+
+    if row_from == row_to && (row_from + col_from) % 2 == 0 { // Horizontal edges
+      // left-to-right edges || right-to-left edges
+      from + 1 == to || from == to + 1
+    } else if col_from == col_to && (row_from + col_from) % 2 != 0 { // Vertical edges
+      // top-to-bottom edges    ||   bottom-to-top edges
+      (row_from + 1 == row_to)  || (row_from == row_to + 1)
+    } else {
+      false
+    }
+  }
+
+  fn strongly_connected(graph_size: usize) -> bool {
+    if graph_size < 4 { return false }
+    let mut sq = Square::new();
+    sq.set_size(graph_size, usize::MAX);
+    let last_node = graph_size - 1;
+    let (last_row, last_col) = sq.row_col(last_node);
+    last_col != 0 && (last_row != 1 || last_col + 1 == sq.0)
+  }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum SccGraphConn {
+  Sq(Square),
   Tri(Triangular),
   Complete(AllEdges),
   Cycle(Cycle),
@@ -278,6 +337,7 @@ impl Connectivity for SccGraphConn {
   fn set_size(&mut self, nodes: usize, edges: usize) {
     match self {
       SccGraphConn::Cycle(c) => c.set_size(nodes, edges),
+      SccGraphConn::Sq(c) => c.set_size(nodes, edges),
       _ => {}
     }
   }
@@ -285,6 +345,7 @@ impl Connectivity for SccGraphConn {
   fn connected(&mut self, from: usize, to: usize) -> bool {
     match self {
       SccGraphConn::Cycle(c) => c.connected(from, to),
+      SccGraphConn::Sq(c) => c.connected(from, to),
       SccGraphConn::Tri(c) => c.connected(from, to),
       SccGraphConn::Complete(c) => c.connected(from, to),
     }
@@ -397,15 +458,52 @@ impl NodeSpec for IdenticalNodes {
 mod tests {
   use super::*;
   use proptest::prelude::*;
+  use crate::viz::{GraphViz, LayoutAlgo};
 
   #[test]
-  fn sanity_checks() {
-    assert_eq!(triangular_graph_is_strongly_connected(3), true);
-    assert_eq!(triangular_graph_is_strongly_connected(4), false);
-    assert_eq!(triangular_graph_is_strongly_connected(6), true);
-    assert_eq!(triangular_graph_is_strongly_connected(7), false);
+  fn debug() {
+    GraphSpec::new(5, IdenticalNodes{ lb: 0, ub: 1, obj: 0}, Square::new(), AllSame(0))
+      .save_svg_with_layout("scrap.svg", LayoutAlgo::Neato);
+  }
+
+  #[test]
+  fn tri_sanity_checks() {
+    assert_eq!(Triangular::strongly_connected(3), true);
+    assert_eq!(Triangular::strongly_connected(4), false);
+    assert_eq!(Triangular::strongly_connected(6), true);
+    assert_eq!(Triangular::strongly_connected(7), false);
     assert_eq!(inverse_triangular_number(0), 0);
     assert_eq!(triangular_number(0), 0);
+  }
+
+  #[test]
+  fn sq_sanity_checks() {
+    assert_eq!(Square::strongly_connected(1), false);
+    assert_eq!(Square::strongly_connected(2), false);
+    assert_eq!(Square::strongly_connected(3), false);
+
+    // 0 1
+    // 2 3
+    assert_eq!(Square::strongly_connected(4), true);
+
+    // 0 1 2
+    // 3 4
+    assert_eq!(Square::strongly_connected(5), false);
+
+    // 0 1 2
+    // 3 4 6
+    assert_eq!(Square::strongly_connected(6), true);
+
+    // 0 1 2
+    // 3 4 5
+    // 6
+    assert_eq!(Square::strongly_connected(7), false);
+
+    // 0  1  2  3
+    // 4  5  6  7
+    // 8  9  10 11
+    // 12 13 14
+    assert_eq!(Square::strongly_connected(15), true);
   }
 
   proptest! {
