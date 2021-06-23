@@ -5,20 +5,38 @@ pub enum ShortestPathAlg {}
 
 #[derive(Debug, Copy, Clone)]
 enum Label {
+  // The source node
   Src { node: usize },
+  // Sentinel for values which have not been processed, but are already in the queue.
+  Queued,
+  // Regular node
   Node { dist_from_src: u32, node: usize, pred: usize },
+  // Sentinel for destination which has never been visited
   DestUnvisited { node: usize },
+  // Destination node
   Dest { dist_from_src: u32, node: usize, pred: usize },
 }
 
 impl Label {
   pub fn node(&self) -> usize {
     match *self {
+      Label::Queued => unreachable!(),
       Label::Src { node }
       | Label::Node { node, .. }
       | Label::DestUnvisited { node }
       | Label::Dest { node, .. }
       => node
+    }
+  }
+
+  pub fn pretty(&self) -> String {
+    use Label::*;
+    match self {
+      Src { node } => format!("S({})", node),
+      Node { node, dist_from_src, pred } => format!("N({} <- {}; d={})", node, pred, dist_from_src),
+      Queued => "Q".to_string(),
+      Dest { node, dist_from_src, pred } => format!("D({} <- {}; d={})", node, pred, dist_from_src),
+      DestUnvisited { node } => format!("U({})", node),
     }
   }
 }
@@ -36,19 +54,24 @@ impl<D> ShortestPaths<D> {
     }
   }
 
+  /// Returns the label corresponding to the destination node.  Panics if `dest` was not a destination node
+  /// during labeling, or was never reached due to pruning
   fn dest_label(&self, dest: usize) -> Label {
     use Label::*;
     match self.labels.get(&dest) {
       None | Some(DestUnvisited { .. }) => panic!("BFS terminated before finding path to node {}", dest),
+      Some(Queued) => unreachable!("should never reach a node"),
       Some(Node { .. })
       | Some(Src { .. }) => panic!("Node {} is not a destination node", dest),
       Some(l @ Dest { .. }) => *l
     }
   }
 
+  /// Returns length of the shortest path from the source node to this dest node, in number of edges.
+  /// Panics if [`ShortestPaths::dest_label`] panics
   pub fn num_edges(&self, dest: usize) -> usize {
     match self.dest_label(dest) {
-      Label::Dest { dist_from_src, .. } => dist_from_src as usize + 1,
+      Label::Dest { dist_from_src, .. } => dist_from_src as usize,
       _ => unreachable!()
     }
   }
@@ -86,7 +109,7 @@ impl<D> Iterator for ShortestPath<'_, D> {
     use Label::*;
     match self.label.take() {
       Some(l) => match l {
-        DestUnvisited { .. } => unreachable!(),
+        DestUnvisited { .. } | Queued => unreachable!(),
         Dest { node, pred, .. } | Node { node, pred, .. } => {
           self.label = Some(self.path.labels[&pred]);
           Some(node)
@@ -104,7 +127,7 @@ impl<D> Iterator for ShortestPath<'_, D> {
 
     let sz = match self.label {
       Some(l) => match l {
-        DestUnvisited { .. } => unreachable!(),
+        DestUnvisited { .. } | Queued => unreachable!(),
         Dest { dist_from_src, .. } | Node { dist_from_src, .. } => dist_from_src as usize + 1,
         Src { .. } => 1,
       }
@@ -182,16 +205,15 @@ impl Graph {
     if n_dests == 0 { return None; }
     let mut n_dests_found = 0;
     let mut queue = VecDeque::with_capacity(scc.len());
-    queue.push_back(Src { node: src });
-    // FIXME something ain't right here - seems way too slow
-    'bfs: while let Some(v_label) = queue.pop_front() {
-      println!("pop({:?}) {:?}", &v_label, &queue);
 
+    queue.push_back(Src { node: src });
+
+    'bfs: while let Some(v_label) = queue.pop_front() {
       let (v, new_dist_from_src) = match v_label {
         Src { node } => (node, 1),
         Dest { dist_from_src, node, .. } => (node, dist_from_src + 1),
         Node { dist_from_src, node, .. } => (node, dist_from_src + 1),
-        DestUnvisited { .. } => unreachable!(),
+        DestUnvisited { .. } | Queued => unreachable!(),
       };
 
       if let Some(bnd) = prune.bound() {
@@ -209,18 +231,16 @@ impl Graph {
               labels.insert(v, v_label);
               break 'bfs;
             } else {
-              println!("push({:?}) {:?}", &dest_label, &queue);
               queue.push_back(*dest_label);
             }
           }
           None => {
-            println!("push({:?}) {:?}", Node { dist_from_src: new_dist_from_src, node: w, pred: v }, &queue);
+            labels.insert(w, Queued);
             queue.push_back(Node { dist_from_src: new_dist_from_src, node: w, pred: v });
           }
-          Some(_) => {}
+          Some(_) => {},
         }
       }
-      assert!(queue.len() < 6); // FIXME remove this
       labels.insert(v, v_label);
     }
 
@@ -293,7 +313,6 @@ impl Graph {
   /// If `prune` is `Some(k)`, only looks for IIS strictly smaller than `k`
   /// Returns `None` if no such IIS exists in the SCC.
   fn find_smallest_cycle_bound_iis(&self, scc: &FnvHashSet<usize>, prune: Option<u32>) -> Option<Iis> {
-    // TODO optimisation: start with the smallest lb.
     let mut best_iis = None;
     let mut global_path_prune = match prune {
       None => Prune::BestDest,
@@ -332,9 +351,6 @@ impl Graph {
           iis.clear();
           iis.add_backwards_path(p1.map(|n| self.var_from_node_id(n)), true);
           iis.add_forwards_path(p2.map(|n| self.var_from_node_id(n)), false);
-          if iis_size != iis.constrs.len() {
-            println!("{:?}", iis.constrs);
-          }
           debug_assert_eq!(iis_size, iis.constrs.len());
           global_path_prune.update_bound(|_| iis.len() as u32 - 2);
         }
@@ -376,7 +392,6 @@ mod tests {
   fn cbi_triangular_graph() -> impl Strategy<Value=GraphSpec> {
     (1..=13usize).prop_flat_map(|mut rank| {
       let size = triangular_number(rank) + 1;
-      dbg!(size);
       graph(size, Triangular(), Just(NodeData{ lb: 0, ub: 4, obj: 0}), Just(0))
     })
       .prop_map(|mut g| {
@@ -406,7 +421,6 @@ mod tests {
       let t = std::time::Instant::now();
 
       let iis_size= 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
-      println!("{}, {}", iis_size, g.nodes.len());
       g.solve();
       println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       let (sccs, first_inf_scc) = match &g.state {
@@ -416,22 +430,46 @@ mod tests {
       let t = std::time::Instant::now();
       prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
-      println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       prop_assert_eq!(iis.len(), iis_size);
-      if g.nodes.len() > 100 {
-        panic!()
+      println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+      let no_iis = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
+      prop_assert_eq!(no_iis, None);
+      let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
+      match iis2 {
+        Some(iis2) =>prop_assert_eq!(iis2.len(), iis.len()),
+        None => test_case_bail!("no iis found")
       }
+
+      Ok(())
+    }
+
+    fn mixed_cycle_inf_triangular_graph(g: &mut Graph) -> TestCaseResult {
+      g.solve();
+      let (sccs, first_inf_scc) = match &g.state {
+        ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
+        other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+      };
+      prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
+
+      let t = std::time::Instant::now();
+      let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+      prop_assert_eq!(iis.len(), 3);
+      println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       Ok(())
     }
   }
 
-  graph_test_dbg!(Tests; cbi_triangular_graph_iis_size);
+  // graph_test_dbg!(Tests; cbi_triangular_graph_iis_size);
 
   graph_tests! {
     Tests;
+    // Triangular graphs with a single non-zero edge
     cei_triangular_graph() =>
-    cei_triangular_graph_iis_size [cases=200, layout=LayoutAlgo::Fdp];
+    cei_triangular_graph_iis_size [layout=LayoutAlgo::Fdp];
+    // Triangular graphs with a zero edges and a bound infeasibile (LB is the top of the triangle, UB is the bottom-right)
     cbi_triangular_graph() =>
-    cbi_triangular_graph_iis_size [cases=200, layout=LayoutAlgo::Fdp];
+    cbi_triangular_graph_iis_size [layout=LayoutAlgo::Fdp];
+    cbi_triangular_graph().prop_map(|mut g| { g.edges.values_mut().for_each(|w| *w = 1); g })
+    => mixed_cycle_inf_triangular_graph [layout=LayoutAlgo::Fdp];
   }
 }
