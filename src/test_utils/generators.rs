@@ -59,6 +59,10 @@ impl GraphSpec {
     n
   }
 
+  pub fn with_node_and_edge_data(nodes: Vec<NodeData>, edges: FnvHashMap<(usize, usize), Weight>) -> Self {
+    GraphSpec{ nodes, edges }
+  }
+
   pub fn with_node_data(nodes: Vec<NodeData>, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
     let num_nodes = nodes.len();
     let num_possible_edges = num_nodes * (num_nodes - 1);

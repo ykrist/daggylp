@@ -152,4 +152,9 @@ impl Graph {
 #[cfg(test)]
 mod tests {
 
+  struct Tests;
+
+  impl Tests {
+
+  }
 }

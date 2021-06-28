@@ -409,7 +409,7 @@ mod tests {
   use crate::graph::{ModelState, Graph};
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
-  use crate::test_utils::strategy::{graph, default_nodes, set_arbitrary_edge_to_one};
+  use crate::test_utils::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
   use crate::viz::LayoutAlgo;
   use std::panic::panic_any;
@@ -423,14 +423,14 @@ mod tests {
       if last_node < triangular_number(rank - 1) + 2 {
         size += 1;
       }
-      set_arbitrary_edge_to_one(graph(size, Triangular(), default_nodes(), Just(0)))
+      set_arbitrary_edge_to_one(graph_with_conn(size, Triangular(), default_nodes(), Just(0)))
     })
   }
 
   fn cbi_triangular_graph() -> impl Strategy<Value=GraphSpec> {
     (1..=13usize).prop_flat_map(|mut rank| {
       let size = triangular_number(rank) + 1;
-      graph(size, Triangular(), Just(NodeData { lb: 0, ub: 4, obj: 0 }), Just(0))
+      graph_with_conn(size, Triangular(), Just(NodeData { lb: 0, ub: 4, obj: 0 }), Just(0))
     })
       .prop_map(|mut g| {
         g.nodes.last_mut().unwrap().lb = 2;

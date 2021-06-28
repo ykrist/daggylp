@@ -330,7 +330,7 @@ mod tests {
 
   fn cycle_graph(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
     (2..1000usize).prop_flat_map(move |size|
-      strategy::graph(size, Cycle::new(), nodes.clone(), 0..strategy::MAX_EDGE_WEIGHT))
+      strategy::graph_with_conn(size, Cycle::new(), nodes.clone(), 0..strategy::MAX_EDGE_WEIGHT))
   }
 
 

@@ -55,7 +55,7 @@ pub fn default_nodes() -> impl Strategy<Value=NodeData> + Clone {
   Just(NodeData { lb: 0, ub: 1, obj: 0 })
 }
 
-pub fn graph(
+pub fn graph_with_conn(
   size: usize,
   mut conn: impl Connectivity,
   nodes: impl Strategy<Value=NodeData> + Clone,
@@ -76,6 +76,58 @@ pub fn graph(
       edges: edges.into_iter().zip(edge_weights).collect(),
     }
   )
+}
+
+fn graph_with_edgelist(
+  size: usize,
+  nodes: impl Strategy<Value=NodeData> + Clone,
+  edge_list: Vec<(usize, usize)>,
+  edge_weights: impl Strategy<Value=Weight> + Clone,
+) -> impl Strategy<Value=GraphSpec> {
+  let n_edges = edge_list.len();
+  (vec![nodes; size], Just(edge_list), vec![edge_weights; n_edges])
+    .prop_map(|(nodes, edge_list, weights)| {
+      let edges: FnvHashMap<_, _> = edge_list.into_iter().zip(weights).collect();
+      GraphSpec::with_node_and_edge_data(nodes, edges)
+    })
+}
+
+pub fn acyclic_graph(
+  size: usize,
+  nodes: impl Strategy<Value=NodeData> + Clone,
+  edge_weights: impl Strategy<Value=Weight> + Clone,
+) -> impl Strategy<Value=GraphSpec>
+{
+  assert!(size > 0);
+  vec![any::<bool>(); size * (size - 1) / 2]
+    .prop_map(move |sparsity_pattern: Vec<bool>| {
+      (0..size).flat_map(|i| (i + 1..size).map(move |j| (i, j)))
+        .zip(sparsity_pattern)
+        .filter_map(|(edge, is_present)| if is_present { Some(edge) } else { None })
+        .collect::<Vec<_>>()
+    })
+    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
+      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
+    )
+}
+
+pub fn graph(
+  size: usize,
+  nodes: impl Strategy<Value=NodeData> + Clone,
+  edge_weights: impl Strategy<Value=Weight> + Clone,
+) -> impl Strategy<Value=GraphSpec>
+{
+  assert!(size > 0);
+  vec![any::<bool>(); size * (size - 1)]
+    .prop_map(move |sparsity_pattern: Vec<bool>| {
+      (0..size).flat_map(|i| (0..size).map(move |j| (i, j))).filter(|(i, j)| i != j)
+        .zip(sparsity_pattern)
+        .filter_map(|(edge, is_present)| if is_present { Some(edge) } else { None })
+        .collect::<Vec<_>>()
+    })
+    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
+      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
+    )
 }
 
 pub const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
@@ -105,12 +157,12 @@ pub const MIN_WEIGHT: Weight = -MAX_WEIGHT;
 // // }
 //
 pub fn complete_graph_zero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (2..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(), Just(0)))
+  (2..=8usize).prop_flat_map(move |size| graph_with_conn(size, AllEdges(), nodes.clone(), Just(0)))
 }
 
 pub fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (2..=8usize).prop_flat_map(move |size| graph(size, AllEdges(), nodes.clone(),
-                                               (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
+  (2..=8usize).prop_flat_map(move |size| graph_with_conn(size, AllEdges(), nodes.clone(),
+                                                         (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
 }
 
 pub fn scc_graph_conn(size: usize) -> impl Strategy<Value=SccGraphConn> {
@@ -129,7 +181,6 @@ pub fn scc_graph(
   size: usize,
   feas: SccKind,
 ) -> impl Strategy<Value=GraphSpec> {
-
   let nodes = match feas {
     SccKind::Feasible | SccKind::InfEdge =>
       node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
@@ -146,7 +197,7 @@ pub fn scc_graph(
   scc_graph_conn(size)
     .prop_flat_map(move |conn| {
       println!("conn = {:?}", conn);
-      graph(size, conn, nodes.clone(), edge_weights.clone())
+      graph_with_conn(size, conn, nodes.clone(), edge_weights.clone())
     })
     .prop_map(move |mut g| {
       match feas {
@@ -154,7 +205,7 @@ pub fn scc_graph(
           if g.edges.values().all(|w| w == &0) {
             *g.edges.values_mut().next().unwrap() = 1;
           }
-        },
+        }
         SccKind::InfBound => {
           let max_lb = g.nodes.iter().map(|n| n.lb).max().unwrap();
           let min_ub = g.nodes.iter().map(|n| n.ub).min().unwrap();
@@ -162,7 +213,7 @@ pub fn scc_graph(
             g.nodes.first_mut().unwrap().lb = min_ub + 1;
           }
         }
-        SccKind::Feasible => {},
+        SccKind::Feasible => {}
       }
       g
     })
