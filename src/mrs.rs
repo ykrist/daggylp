@@ -1,59 +1,105 @@
 use super::graph::*;
 use fnv::FnvHashSet;
+use std::ops::Range;
+use crate::set_with_capacity;
+use std::cmp::{min, max};
+use crate::test_utils::strategy::node;
+use proptest::strategy::W;
 
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Mrs {
-  pub(crate) vars: Vec<Var>,
-  pub(crate) constrs: Vec<Constraint>,
+pub struct MrsTreeNode {
+  node: usize,
+  parent_idx: usize,
+  incoming_edge_weight: Weight,
+  obj: Weight,
+  lb: Weight,
+  /// `MrsTree.nodes[children_start..child_end]` is this node's children
+  children_start: usize,
+  /// `MrsTree.nodes[children_start..child_end]` is this node's children
+  children_end: usize,
+  /// `MrsTree.nodes[children_start..subtree_end] `is the subtree rooted at this node (excluding this node)
+  subtree_end: usize,
 }
 
-impl Mrs {
-  pub(crate) fn new_with_root(root: Var) -> Self {
-    let vars = vec![root];
-    let constrs = vec![Constraint::Lb(root)];
-    Mrs { vars, constrs }
-  }
-
-  pub(crate) fn new_empty() -> Self {
-    Mrs { vars: Vec::default(), constrs: Vec::default() }
-  }
-
-  pub(crate) fn add_var(&mut self, var: Var) {
-    debug_assert!(!self.vars.contains(&var));
-    self.vars.push(var);
-  }
-
-  pub(crate) fn add_constraint(&mut self, c: Constraint) {
-    debug_assert!(!self.constrs.contains(&c));
-    self.constrs.push(c);
-  }
+pub struct MrsTree {
+  graph_id: u32,
+  // Nodes in topological order
+  nodes: Vec<MrsTreeNode>,
 }
 
+impl GraphId for MrsTree {
+  fn graph_id(&self) -> u32 { self.graph_id }
+}
 
-/// Recursive helper function.  For a node n with an active predecessor p, will add the variable on n and the constraint on the active
-/// edge to the same MRS as `p`.  Returns the MRS index for the predecessor.
-fn add_edge_to_mrs(graph: &Graph, n: usize, mrs_list: &mut Vec<Mrs>, mrs_index: &mut [Option<usize>]) -> usize {
-  if let Some(idx) = mrs_index[n] {
-    return idx;
+impl MrsTree {
+  fn build(graph: &Graph, root: usize) -> Self {
+    let r = &graph.nodes[root];
+    
+    let mut nodes = vec![MrsTreeNode {
+      node: root,
+      parent_idx: usize::MAX,
+      incoming_edge_weight: 0,
+      children_start: 1,
+      children_end: 1,
+      subtree_end: 1,
+      lb: r.lb,
+      obj: r.obj,
+    }];
+    
+    let mut tree = MrsTree { graph_id: graph.graph_id(), nodes };
+    tree.build_recursive(graph, root);
+    debug_assert_eq!(tree.nodes[0].subtree_end, tree.nodes.len());
+    tree
   }
+  
+  fn build_recursive(&mut self, graph: &Graph, root: usize) {
+    let idx_of_root = self.nodes.len() - 1;
+    for e in &graph.edges_from[root] {
+      if matches!(e.kind, EdgeKind::Regular) && graph.nodes[e.to].active_pred == Some(root) {
+        let child = &graph.nodes[e.to];
 
-  match graph.nodes[n].active_pred {
-    Some(p) => {
-      let idx = add_edge_to_mrs(graph, p, mrs_list, mrs_index);
-      let node_var = graph.var_from_node_id(n);
-      mrs_list[idx].add_var(node_var);
-      mrs_list[idx].add_constraint(Constraint::Edge(
-        graph.var_from_node_id(p),
-        node_var,
-      ));
-      idx
+        self.nodes.push(MrsTreeNode {
+          node: e.to,
+          parent_idx: idx_of_root,
+          children_start: idx_of_root,
+          children_end: idx_of_root,
+          subtree_end: idx_of_root,
+          lb: child.lb,
+          obj: child.obj,
+          incoming_edge_weight: e.weight,
+
+        });
+      }
     }
-    None => {
-      // this is the root
-      let idx = mrs_list.len();
-      mrs_list.push(Mrs::new_with_root(graph.var_from_node_id(n)));
-      idx
+    let root_children_start = idx_of_root + 1;
+    let root_children_end = self.nodes.len();
+    self.nodes[idx_of_root].children_start = root_children_start;
+    self.nodes[idx_of_root].children_end = root_children_end;
+
+    for child in root_children_start..root_children_end {
+      self.build_recursive(graph, self.nodes[child].node)
+    }
+    self.nodes[idx_of_root].subtree_end = self.nodes.len();
+  }
+  
+  pub fn vars(&self) -> impl Iterator<Item=Var> + '_ {
+    self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
+  }
+
+  pub fn constrs(&self) -> impl Iterator<Item=Constraint> + '_ {
+    std::iter::once(Constraint::Lb(self.var_from_node_id(self.nodes[0].node)))
+      .chain(self.nodes.iter().map(move |n| {
+        Constraint::Edge(self.var_from_node_id(self.nodes[n.parent_idx].node), self.var_from_node_id(n.node))
+      }))
+  }
+
+  /// Computes the optimal solution of the problem defined by a subtree of the MRS.
+  fn forward_label_subtree(&self, soln_buf: &mut [Weight], root_idx: usize) {
+    // We can just traverse in topological order here
+    let root = &self.nodes[root_idx];
+    soln_buf[root_idx] = root.lb;
+    for (i, n) in self.nodes.iter().enumerate().skip(root.children_start).take(root.subtree_end - root.children_start) {
+      debug_assert!(n.parent_idx == root_idx || (root.children_start..root.subtree_end).contains(&i));
+      soln_buf[i] = max(n.lb, soln_buf[n.parent_idx] + n.incoming_edge_weight);
     }
   }
 }
@@ -75,25 +121,68 @@ fn scc_spanning_tree_bfs(edges_from: &Vec<Vec<Edge>>, nodes: &mut [Node], scc: &
 }
 
 impl Graph {
-  pub fn compute_mrs(&mut self) -> Mrs {
-    todo!() // TODO write a version which just pools everything into a single allocated vector
-  }
-
-  pub fn compute_partitioned_mrs(&mut self) -> Vec<Mrs> {
-    self.compute_scc_active_edges();
-
-    let mut visited = vec![None; self.nodes.len()];
-    let mut mrs_list = Vec::new();
-
-    for (mut n, node) in self.nodes.iter().enumerate() {
-      if matches!(&node.kind, NodeKind::Scc(_)) { continue; }
-      // already visited
-      if visited[n].is_some() { continue; }
-      add_edge_to_mrs(self, n, &mut mrs_list, &mut visited);
+  /// For each edge in the tree, how much would the objective change if we removed that edge from the MRS?
+  /// Does *NOT* account for constraints which are not in the MRS.
+  pub fn edge_sensitivity_analysis(&self, mrs: &MrsTree) -> Vec<((Var, Var), Weight)> {
+    // optimal solution for whole tree
+    let mut cum_obj_full_tree: Vec<Weight> = mrs.nodes.iter().map(|n| self.nodes[n.node].x).collect();
+    // traverse in reverse topological order
+    for (i, node) in mrs.nodes.iter().enumerate().rev() {
+      cum_obj_full_tree[i] = node.obj * cum_obj_full_tree[i] +
+        (node.children_start..node.children_end).map(|j| cum_obj_full_tree[j]).sum::<Weight>();
     }
+    // cum_obj_full_tree[i] now holds the cumulative subtree objective (coeff * variable value) at node i
 
-    mrs_list
+    let mut solution_buf = vec![Weight::MAX; mrs.nodes.len()];
+
+    mrs.nodes.iter().enumerate().skip(1)
+      .map(|(i, node)| {
+        let parent_node = &mrs.nodes[node.parent_idx];
+        mrs.forward_label_subtree(&mut solution_buf, i);
+        let cum_obj_subtree = solution_buf[i] * node.obj +
+          solution_buf[node.children_start..node.subtree_end].iter()
+            .zip(&mrs.nodes[node.children_start..node.subtree_end])
+            .map(|(&t, n)| t * n.obj)
+            .sum::<Weight>();
+        let diff = cum_obj_subtree - cum_obj_full_tree[i];
+        debug_assert!(diff <= 0);
+        ((self.var_from_node_id(parent_node.node), self.var_from_node_id(node.node)), diff)
+      })
+      .collect()
   }
+
+  pub fn compute_mrs(&mut self) -> Vec<MrsTree> {
+    let mut is_in_mrs = vec![false; self.nodes.len()];
+
+    let roots: Vec<usize> = self.nodes.iter().enumerate()
+      .filter_map(|(n, node)|
+        if node.obj == 0 || matches!(node.kind, NodeKind::Scc(_)) {
+          None
+        } else {
+          self.mark_path_to_mrs_root(&mut is_in_mrs, n, node)
+        }
+      )
+      .collect();
+
+    roots.into_iter()
+      .map(|r| MrsTree::build(self, r))
+      .collect()
+  }
+  
+  /// Marks the path to the MRS root, returning the root if the root has never been visited and None if it has.
+  fn mark_path_to_mrs_root(&self, is_in_mrs: &mut [bool], n: usize, node: &Node) -> Option<usize> { // TODO this should happen after the active edge re-labelling
+    if !is_in_mrs[n] {
+      is_in_mrs[n] = true;
+      if let Some(pred) = node.active_pred {
+        self.mark_path_to_mrs_root(is_in_mrs, pred, &self.nodes[pred])
+      } else {
+        Some(n)
+      }
+    } else {
+      None
+    }
+  }
+
 
   /// This one's a doozy.
   ///
@@ -118,36 +207,41 @@ impl Graph {
   ///
   /// Once this transformation is done, we have a spanning forest of the original, non-SCC nodes.
   fn compute_scc_active_edges(&mut self) { // FIXME should be a check to ensure this is only called once (Maybe a new model state)
-    // For every Scc, label the internal active-edge tree
+    // Step 1: Mark active edges inside the SCC, and the active edge ENTERING the SCC (if applicable)
     for scc in &self.sccs {
-      let root = match self.nodes[scc.scc_node].active_pred {
+      let (root, root_active_pred) = match self.nodes[scc.scc_node].active_pred {
         // The fake SCC node is not the root
-        Some(n) => match self.find_edge(n, scc.scc_node).kind {
-          EdgeKind::SccIn(n) => n,
+        Some(p) => match self.find_edge(p, scc.scc_node).kind {
+          EdgeKind::SccIn(n) => (n, Some(p)),
+          EdgeKind::SccToScc { from: p, to: n } => (n, Some(p)),
           _ => unreachable!()
         },
         // The fake SCC node *is* the root
-        None => scc.lb_node, // node in the SCC with the max LB
+        None => (scc.lb_node, None), // node in the SCC with the max LB
       };
       // Set up the edges *inside* the SCC
       scc_spanning_tree_bfs(&self.edges_from, &mut self.nodes, &scc.nodes, root);
+      self.nodes[root].active_pred = root_active_pred;
     }
 
-    // For all nodes that have an active edge from an SCC node, move the active edge to come
-    // from the relevant SCC-component node, which will now have a tree
+    // Step 2: Mark active edges leaving the SCC.
+    // Note that if we have an active edge SCC(1) -> SCC(2) during forward-labelling,
+    // this edge has already been processed in Step 1 for SCC(2).
+    // Therefore, we only need to check active edges SCC -> VAR
     for n in 0..self.nodes.len() {
-      if let Some(p) = self.nodes[n].active_pred {
-        if matches!(self.nodes[p].kind, NodeKind::Scc(_)) { // this node's pred is a fake SCC node
-          // move the active edge to come from the underling real node inside the SCC
-          let scc_member = match self.find_edge(p, n).kind {
-            EdgeKind::SccOut(scc_member) => scc_member,
-            _ => unreachable!()
-          };
-          self.nodes[n].active_pred = Some(scc_member);
+      match (self.nodes[n].active_pred, self.nodes[n].kind) {
+        (Some(p), NodeKind::Var) => {
+          if matches!(self.nodes[p].kind, NodeKind::Scc(_)) {
+            let scc_member = match self.find_edge(p, n).kind {
+              EdgeKind::SccOut(scc_member) => scc_member,
+              _ => unreachable!(),
+            };
+            self.nodes[n].active_pred = Some(scc_member);
+          }
         }
+        (Some(_), NodeKind::Scc(_)) => self.nodes[n].active_pred = None, // TODO necessary only for debug output?
+        _ => {}
       }
     }
   }
-
-
 }

@@ -61,8 +61,8 @@ pub enum Constraint {
 
 #[derive(Hash, Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Var {
-  graph_id: u32,
-  node: usize,
+  pub(crate) graph_id: u32,
+  pub(crate) node: usize,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -225,6 +225,18 @@ impl<D: EdgeDir> Iterator for NeighboursIter<'_, D> {
 
 impl<D: EdgeDir> ExactSizeIterator for NeighboursIter<'_, D>{}
 
+pub(crate) trait GraphId {
+  fn graph_id(&self) -> u32;
+
+  fn var_from_node_id(&self, node: usize) -> Var {
+    Var{ node, graph_id: self.graph_id() }
+  }
+}
+
+impl GraphId for Graph {
+  fn graph_id(&self) -> u32 { self.id }
+}
+
 impl Graph {
   pub fn new_with_params(params: Parameters) -> Self {
     static NEXT_ID: AtomicU32 = AtomicU32::new(0);
@@ -261,9 +273,9 @@ impl Graph {
     id
   }
 
-  pub(crate) fn var_from_node_id(&self, node: usize) -> Var {
-    Var { graph_id: self.id, node }
-  }
+  // pub(crate) fn var_from_node_id(&self, node: usize) -> Var {
+  //   Var { graph_id: self.id, node }
+  // }
 
   pub(crate) fn add_var(&mut self, obj: Weight, lb: Weight, ub: Weight) -> Var {
     assert!(obj >= 0);
