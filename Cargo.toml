@@ -12,8 +12,8 @@ proptest = "1.0.0" # dev
 rand = { version = "0.8.3", features = ["small_rng"]} # dev
 grb = { version = "1.0.4", optional = true } # dev + grb
 anyhow = "1.0.41" # dev
-serde = { version = "1.0.126", features = ["derive"] }
-serde_json = "1.0.64"
+serde = { version = "1.0.126", features = ["derive"] }  # dev
+serde_json = "1.0.64"  # dev
 
 [features]
 tests-gurobi = ["grb"]
@@ -24,3 +24,7 @@ test-case = "1.1.0"
 [[bin]]
 name = "generate-test-cases"
 path = "src/bin/generate-test-cases.rs"
+
+[[bin]]
+name = "mark-failed-as-regression"
+path = "src/bin/mark-failed-as-regression.rs"

@@ -111,6 +111,27 @@ pub fn acyclic_graph(
     )
 }
 
+pub fn connected_acyclic_graph(
+  size: usize,
+  nodes: impl Strategy<Value=NodeData> + Clone,
+  edge_weights: impl Strategy<Value=Weight> + Clone,
+) -> impl Strategy<Value=GraphSpec>
+{
+  assert!(size > 0);
+  vec![any::<bool>(); size * (size - 1) / 2]
+    .prop_map(move |sparsity_pattern: Vec<bool>| {
+      (0..size).flat_map(|i| (i + 1..size).map(move |j| (i, j)))
+        .zip(sparsity_pattern)
+        .filter_map(|((i,j), is_present)| {
+          if i + 1== j || is_present  { Some((i,j)) } else { None }
+        })
+        .collect::<Vec<_>>()
+    })
+    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
+      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
+    )
+}
+
 pub fn graph(
   size: usize,
   nodes: impl Strategy<Value=NodeData> + Clone,

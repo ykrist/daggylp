@@ -273,10 +273,6 @@ impl Graph {
     id
   }
 
-  // pub(crate) fn var_from_node_id(&self, node: usize) -> Var {
-  //   Var { graph_id: self.id, node }
-  // }
-
   pub(crate) fn add_var(&mut self, obj: Weight, lb: Weight, ub: Weight) -> Var {
     assert!(obj >= 0);
     let n = self.add_node(obj, lb, ub, NodeKind::Var);
@@ -424,7 +420,7 @@ impl Graph {
         return e
       }
     }
-    unreachable!()
+    unreachable!("edge does not exist in edges_from")
   }
 }
 
@@ -437,24 +433,20 @@ mod tests {
   use SolveStatus::*;
   use InfKind::*;
 
-  #[test_case("simple-f" => Optimal)]
-  #[test_case("simple-cycle-cei" => Infeasible(Cycle))]
-  #[test_case("simple-cycle-f" => Optimal)]
-  #[test_case("complex-scc-cei" => Infeasible(Cycle))]
-  #[test_case("multiple-sccs-f" => Optimal)]
-  #[test_case("k8-f" => Optimal)]
-  #[test_case("k8-cei" => Infeasible(Cycle))]
-  #[test_case("k8-cbi" => Infeasible(Cycle))]
-  fn solve(input_name: &str) -> SolveStatus {
-    let mut g = GraphSpec::load_from_file(test_input(input_name)).unwrap().build();
-    let status = g.solve();
-    // if draw {
-    g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));
-    status
-  }
+  // #[test_case("simple-f" => Optimal)]
+  // #[test_case("simple-cycle-cei" => Infeasible(Cycle))]
+  // #[test_case("simple-cycle-f" => Optimal)]
+  // #[test_case("complex-scc-cei" => Infeasible(Cycle))]
+  // #[test_case("multiple-sccs-f" => Optimal)]
+  // #[test_case("k8-f" => Optimal)]
+  // #[test_case("k8-cei" => Infeasible(Cycle))]
+  // #[test_case("k8-cbi" => Infeasible(Cycle))]
+  // fn solve(input_name: &str) -> SolveStatus {
+  //   let mut g = GraphSpec::load_from_file(test_input(input_name)).unwrap().build();
+  //   let status = g.solve();
+  //   // if draw {
+  //   g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));
+  //   status
+  // }
 
-  #[test]
-  fn foo() {
-
-  }
 }

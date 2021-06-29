@@ -211,18 +211,18 @@ impl<'a> GraphViz<'a, usize, (usize, usize)> for GraphSpec {}
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::test_utils::*;
-
-  #[test]
-  fn viz() {
-    let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap().build();
-    g.viz().save_svg(test_output("test.svg"));
-  }
-
-  #[test]
-  fn viz_generator() {
-    let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
-    g.save_svg(test_output("test.generator.svg"));
-  }
+  // use super::*;
+  // use crate::test_utils::*;
+  //
+  // #[test]
+  // fn viz() {
+  //   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap().build();
+  //   g.viz().save_svg(test_output("test.svg"));
+  // }
+  //
+  // #[test]
+  // fn viz_generator() {
+  //   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
+  //   g.save_svg(test_output("test.generator.svg"));
+  // }
 }

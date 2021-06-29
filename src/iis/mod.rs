@@ -59,6 +59,7 @@ impl Iis {
       self.add_constraint(Constraint::Lb(i));
     }
     for j in vars {
+      dbg!(i, j);
       self.add_constraint(Constraint::Edge(i, j));
       i = j;
     }
@@ -68,7 +69,7 @@ impl Iis {
   }
 
   /// Path should be in reverse order ( end <- ... <- start)
-  ///   /// If `bounds` is `true`, add the lower bound of start and upper bound of end to the IIS.
+  /// If `bounds` is `true`, add the lower bound of start and upper bound of end to the IIS.
   pub(crate) fn add_backwards_path(&mut self, vars: impl IntoIterator<Item=Var>, bounds: bool) {
     let mut vars = vars.into_iter();
     self.constrs.reserve(vars.size_hint().0);

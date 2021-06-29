@@ -288,12 +288,12 @@ mod tests {
     fn scc_sizes(g: &mut Graph, actual_sizes: SccSizeOrder) -> TestCaseResult {
       let sccs = g.find_sccs();
       let sizes = SccSizeOrder(sccs.iter().map(|l| l.len()).collect());
-      println!("SCCS found: {:?}", sccs);
-      println!("actual {:?}", &actual_sizes);
       prop_assert_eq!(sizes.sorted(), actual_sizes.sorted());
       Ok(())
     }
   }
+
+  // graph_test_dbg!(Tests; scc_sizes _);
 
   graph_tests!{
     Tests;

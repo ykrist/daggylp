@@ -104,9 +104,10 @@ impl Graph {
 
     let (path_len, initial_state) = shortest_path_initial_state.unwrap();
     let shortest_path = DpShortestPath::new(&cache, initial_state, path_len);
-    let mut iis = Iis::with_capacity(path_len as usize + 1);
-    iis.add_forwards_path(shortest_path.map(|n| self.var_from_node_id(n)), true);
-    debug_assert_eq!(iis.constrs.capacity(), iis.constrs.len());
+    let iis_size = path_len as usize + 2;
+    let mut iis = Iis::with_capacity(iis_size);
+    iis.add_backwards_path(shortest_path.map(|n| self.var_from_node_id(n)), true);
+    debug_assert_eq!(iis.constrs.len(), iis_size);
     iis
   }
 
@@ -151,10 +152,90 @@ impl Graph {
 
 #[cfg(test)]
 mod tests {
+  use super::*;
+  #[macro_use]
+  use crate::*;
+  use crate::test_utils::*;
+  use proptest::prelude::*;
+  use proptest::test_runner::TestCaseResult;
+  use crate::test_utils::strategy::node;
+
+
+  fn graph_with_single_path_iis() -> impl Strategy<Value=GraphSpec> {
+    (10..=100usize).prop_flat_map(|size| {
+      strategy::connected_acyclic_graph(size, Just(NodeData{ lb: 0, ub: 1, obj: 0 }), Just(0))
+    }).prop_map(|mut g| {
+      g.nodes.first_mut().unwrap().lb = 1;
+      g.nodes.last_mut().unwrap().ub = 0;
+      g
+    })
+  }
+
+
+  fn iis_graph() -> impl Strategy<Value=GraphSpec> {
+    (10..=100usize).prop_flat_map(move |size| {
+      let max: Weight = 10_000;
+      let min: Weight = -10_000;
+      let nodes = node((min..=max, min..=max), Just(0));
+      strategy::connected_acyclic_graph(size, nodes, 0..=max)
+    })
+  }
+
 
   struct Tests;
 
   impl Tests {
+    fn find_single_path_iis(g: &mut Graph) -> TestCaseResult {
+      let status = g.solve();
+      prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
+      let iis = g.compute_iis();
+      prop_assert!(iis.len() - 2 < g.nodes.len());
+      Ok(())
+    }
 
+    fn find_path_iis(g: &mut Graph) -> TestCaseResult {
+      let status = g.solve();
+      prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
+      prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
+      let iis = g.compute_iis();
+      prop_assert!(iis.len() - 2 < g.nodes.len());
+
+      let mut ub = None;
+      let mut lb = None;
+      let mut edge_sum : Weight = 0;
+      for c in &iis.constrs {
+        match c {
+          Constraint::Ub(v) => {
+            if ub.is_some() { prop_assert!(false, "should only have one UB in IIS: {:?}", &iis.constrs) }
+            ub = Some(g.nodes[v.node].ub);
+          },
+          Constraint::Lb(v) => {
+            if lb.is_some() { prop_assert!(false, "should only have one LB in IIS: {:?}", &iis.constrs) }
+            lb = Some(g.nodes[v.node].lb);
+          },
+          Constraint::Edge(v1, v2) => edge_sum += g.find_edge(v1.node, v2.node).weight,
+        }
+      }
+      let ub = ub.expect("UB constraint in IIS");
+      let lb = lb.expect("UB constraint in IIS");
+
+      prop_assert!(lb + edge_sum > ub);
+      for c in &iis.constrs {
+        if let Constraint::Edge(v1, v2) = c {
+          let w = g.find_edge(v1.node, v2.node).weight;
+          prop_assert!(lb + edge_sum - w <= ub)
+        }
+      }
+      Ok(())
+    }
   }
+
+  // graph_test_dbg!(Tests; find_path_iis);
+
+  graph_tests!{
+    Tests;
+    graph_with_single_path_iis() => find_single_path_iis;
+    iis_graph() => find_path_iis [cases=1000];
+  }
+
 }

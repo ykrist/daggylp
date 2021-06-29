@@ -1,6 +1,6 @@
 use super::*;
 use crate::iis::Iis;
-use crate::test_utils::{GraphSpec, test_output_dir, proptest_config_cases};
+use crate::test_utils::{GraphSpec};
 use crate::viz::{GraphViz, LayoutAlgo};
 use proptest::prelude::{TestCaseError, Strategy};
 use proptest::test_runner::{TestCaseResult, TestError};

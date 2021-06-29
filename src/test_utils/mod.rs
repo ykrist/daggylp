@@ -15,60 +15,170 @@ use proptest::prelude::*;
 use std::path::{PathBuf, Path};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use crate::test_utils::strategy::SccKind;
+use glob::MatchOptions;
+use std::borrow::Cow;
+use crate::test_utils::GraphTestMode::Regression;
 
-pub(crate) fn test_input_dir() -> &'static Path {
-  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
+use anyhow::Context;
+use std::ffi::OsString;
+use std::marker::PhantomData;
+use std::fmt;
+
+// pub(crate) fn test_input_dir() -> &'static Path {
+//   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
+// }
+
+pub(crate) fn test_failures_dir() -> &'static Path {
+  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/failures"))
 }
 
-pub(crate) fn test_output_dir() -> &'static Path {
-  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/outputs"))
+pub(crate) fn test_regressions_dir() -> &'static Path {
+  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/regressions"))
 }
 
-pub(crate) fn test_input(name: &str) -> PathBuf {
-  let mut path = test_input_dir().to_path_buf();
-  path.push(name);
-  path.set_extension("txt");
-  path
+fn is_unit_ty<M: 'static>() -> bool {
+  use std::any::TypeId;
+  TypeId::of::<M>() == TypeId::of::<()>()
 }
 
-
-pub(crate) fn test_output(filename: &str) -> PathBuf {
-  test_output_dir().join(filename)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TestManifest {
+  #[serde(skip)]
+  path: PathBuf,
+  /// Path (relative to the inputs.json) in which meta-information resides, if it exists
+  meta: String,
+  /// Path (relative to the inputs.json) in which the input graph resides
+  input: String,
+  /// Path (relative to the inputs.json) in which the input graph resides
+  input_graph: String,
+  /// Path (relative to the inputs.json) in which the input graph resides
+  output_graph: String,
 }
 
+impl TestManifest {
+  fn new(test_id: &str, mode: GraphTestMode) -> Self {
+    let (mut path, input_prefix, output_prefix) = match &mode {
+      GraphTestMode::Regression(i) => {
+        let p = test_regressions_dir().join(test_id);
+        std::fs::create_dir_all(&p).unwrap();
+        let input_prefix = format!("{}", i);
+        let output_prefix = input_prefix.clone();
+        (p, input_prefix, output_prefix)
+      }
+      GraphTestMode::Proptest => {
+        let input_prefix = test_id.to_string();
+        let output_prefix = input_prefix.clone();
+        (test_failures_dir().to_path_buf(), input_prefix, output_prefix)
+      }
+      GraphTestMode::Debug => {
+        (test_failures_dir().to_path_buf(), test_id.to_string(), format!("{}.debug", test_id))
+      }
+    };
+    path.push(format!("{}.manifest.json", &input_prefix));
 
-pub fn proptest_config_cases(cases: u32) -> ProptestConfig {
-  ProptestConfig::with_cases(cases)
+    TestManifest {
+      path,
+      meta: format!("{}.meta.input.json", &input_prefix),
+      input: format!("{}.input.txt", &input_prefix),
+      input_graph: format!("{}.input.svg", &input_prefix),
+      output_graph: format!("{}.output.svg", &output_prefix),
+    }
+  }
+
+  fn from_file(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
+    let path = path.into();
+    let contents = std::fs::read_to_string(&path)
+      .with_context(|| format!("read manifest {:?}", &path))?;
+    let mut manifest : Self = serde_json::from_str(&contents)?;
+    manifest.path = path;
+    Ok(manifest)
+  }
+
+  fn to_file(&self) -> anyhow::Result<()> {
+    std::fs::write(&self.path, serde_json::to_string_pretty(&self)?)
+      .with_context(|| format!("write manifest {:?}", &self.path))
+  }
+
+  fn migrate_input_files(&self, dest: &Self) -> anyhow::Result<()> {
+    use std::fs::copy;
+    dbg!(&self, &dest);
+    let mut src_path = self.path.to_path_buf();
+    let mut dest_path = dest.path.to_path_buf();
+
+    for (src, dst, missing_ok) in &[
+      (&self.input, &dest.input, false),
+      (&self.input_graph, &dest.input_graph, false),
+      (&self.meta, &dest.meta, true),
+    ] {
+      src_path.set_file_name(src);
+      dest_path.set_file_name(dst);
+      if !*missing_ok || src_path.exists() {
+        std::fs::rename(&src_path, &dest_path)
+          .with_context(|| format!("copying {:?} to {:?}", &src_path, &dest_path))?;
+      }
+    }
+    Ok(())
+  }
+
+  fn write_meta<V: TestInput>(&self, meta: &V::Meta) -> anyhow::Result<()> {
+    if !is_unit_ty::<V::Meta>() {
+      let contents = serde_json::to_string_pretty(meta)?;
+      let path = self.path.with_file_name(&self.meta);
+      std::fs::write(&path, contents).with_context(|| format!("manifest path {:?}", &path))?;
+    }
+    Ok(())
+  }
+
+  fn write_input(&self, g: &GraphSpec) -> anyhow::Result<()> {
+    g.save_to_file(self.path.with_file_name(&self.input));
+    Ok(())
+  }
+
+  fn write_input_graph(&self, g: &GraphSpec, layout: LayoutAlgo) -> anyhow::Result<()> {
+    g.save_svg_with_layout(self.path.with_file_name(&self.input_graph), layout);
+    Ok(())
+  }
+
+  fn write_output_graph(&self, g: &Graph, layout: LayoutAlgo) -> anyhow::Result<()> {
+    g.viz().save_svg_with_layout(self.path.with_file_name(&self.output_graph), layout);
+    Ok(())
+  }
+
+  fn load_input(&self) -> anyhow::Result<GraphSpec> {
+    GraphSpec::load_from_file(self.path.with_file_name(&self.input))
+  }
+
+  fn load_meta<V: TestInput>(&self) -> anyhow::Result<V::Meta> {
+    if let Some(meta) = V::constant_meta() {
+      return Ok(meta);
+    }
+    let path = self.path.with_file_name(&self.meta);
+    let contents = std::fs::read_to_string(&path)
+      .with_context(|| format!("read meta from file {:?}", &path))?;
+    Ok(serde_json::from_str(&contents)?)
+  }
 }
 
-pub fn proptest_config() -> ProptestConfig {
-  proptest_config_cases(100)
-}
-
-pub struct GraphTestRunner {
-  id: &'static str,
+pub struct GraphTestRunner<'a> {
+  id: &'a str,
+  skip_regressions: bool,
+  deterministic: bool,
   layout: LayoutAlgo,
   config: ProptestConfig,
-  input_graph: PathBuf,
-  input_meta: PathBuf,
-  input_svg: PathBuf,
-  output_svg: PathBuf,
 }
 
 type GraphTestResult = std::result::Result<(), String>;
 
 
 pub trait TestInput: Sized {
-  type Meta;
-  type TestFunction;
+  type Meta: Serialize + DeserializeOwned + 'static;
+  type TestFunction: Copy;
 
-  fn save_meta(&self, path: impl AsRef<Path>);
-
-  fn load_meta(g: GraphSpec, path: impl AsRef<Path>) -> Self;
+  fn constant_meta() -> Option<Self::Meta> { None }
 
   fn split(self) -> (GraphSpec, Self::Meta);
 
-  fn run_test(test: &Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult;
+  fn run_test(test: Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult;
 }
 
 
@@ -76,74 +186,59 @@ impl TestInput for GraphSpec {
   type Meta = ();
   type TestFunction = fn(&mut Graph) -> TestCaseResult;
 
-  fn save_meta(&self, _: impl AsRef<Path>) {}
-
-  fn load_meta(g: GraphSpec, _: impl AsRef<Path>) -> Self { g }
+  fn constant_meta() -> Option<Self::Meta> { Some(()) }
 
   fn split(self) -> (GraphSpec, Self::Meta) {
     (self, ())
   }
 
-  fn run_test(test: &Self::TestFunction, input: (&mut Graph, ())) -> TestCaseResult {
+  fn run_test(test: Self::TestFunction, input: (&mut Graph, ())) -> TestCaseResult {
     (test)(input.0)
   }
 }
 
-impl<M: Serialize + DeserializeOwned> TestInput for (GraphSpec, M) {
+impl<M: Serialize + DeserializeOwned + 'static> TestInput for (GraphSpec, M) {
   type Meta = M;
   type TestFunction = fn(&mut Graph, M) -> TestCaseResult;
-
-  fn save_meta(&self, path: impl AsRef<Path>) {
-    std::fs::write(path, serde_json::to_string_pretty(&self.1).unwrap()).unwrap();
-  }
-
-  fn load_meta(g: GraphSpec, path: impl AsRef<Path>) -> Self {
-    (g, serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap())
-  }
 
   fn split(self) -> (GraphSpec, Self::Meta) {
     self
   }
 
-  fn run_test(test: &Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult {
+  fn run_test(test: Self::TestFunction, input: (&mut Graph, Self::Meta)) -> TestCaseResult {
     (test)(input.0, input.1)
   }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialOrd, PartialEq)]
+enum GraphTestMode {
+  Proptest,
+  Regression(u32),
+  Debug,
+}
 
-impl GraphTestRunner {
-  pub fn new_with_layout_prog(id: &'static str, layout: LayoutAlgo) -> Self {
-    // Ok to leak memory here - is only for testing and we only leak once per test.
-    // let path: &'static str = Box::leak(format!("{}/tests/regressions/{}.txt", env!("CARGO_MANIFEST_DIR"), id).into_boxed_str());
-
+impl<'a> GraphTestRunner<'a> {
+  pub fn new_with_layout_prog(id: &'a str, layout: LayoutAlgo) -> Self {
     let mut config = ProptestConfig::with_cases(1000);
     config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
     // TODO keep track of regressions ourselves, since we have a unified input format
     config.result_cache = prop::test_runner::basic_result_cache;
 
-    let mut path = test_output_dir().join("failures");
-    path.push(id);
-    let output_svg = path.with_extension("svg");
-    let mut path = path.into_os_string();
-    path.push("-input");
-    let mut path = PathBuf::from(path);
-    let input_meta = path.with_extension("json");
-    let input_graph = path.with_extension("txt");
-    path.set_extension("svg");
-    let input_svg = path;
-
     GraphTestRunner {
       id,
+      skip_regressions: false,
+      deterministic: false,
       layout,
       config,
-      output_svg,
-      input_meta,
-      input_svg,
-      input_graph
     }
   }
 
-  pub fn new(id: &'static str) -> Self {
+  fn manifest(&self, mode: GraphTestMode) -> TestManifest {
+    TestManifest::new(self.id, mode)
+  }
+
+
+  pub fn new(id: &'a str) -> Self {
     Self::new_with_layout_prog(id, LayoutAlgo::Dot)
   }
 
@@ -152,29 +247,42 @@ impl GraphTestRunner {
       V: TestInput,
       S: Strategy<Value=V>,
   {
+    if !self.skip_regressions {
+      self.run_regressions::<V>(test);
+    }
+
     use TestError::*;
-    // let mut runner = prop::test_runner::TestRunner::new(self.config.clone());
-    let mut runner = prop::test_runner::TestRunner::new_with_rng(self.config.clone(), prop::test_runner::TestRng::deterministic_rng(self.config.rng_algorithm));
+    let mut runner = if self.deterministic {
+      prop::test_runner::TestRunner::new_with_rng(
+        self.config.clone(),
+        prop::test_runner::TestRng::deterministic_rng(self.config.rng_algorithm)
+      )
+    } else {
+      prop::test_runner::TestRunner::new(self.config.clone())
+    };
     let result = runner.run(&strategy, |input| {
       let (mut graph_spec, meta) = input.split();
       let mut g = graph_spec.build();
-      V::run_test(&test, (&mut g, meta))
+      V::run_test(test, (&mut g, meta))
     });
 
+    let manifest = self.manifest(GraphTestMode::Proptest);
 
     match result {
       Err(Abort(reason)) => {
         panic!("test aborted: {}", reason.message());
       }
       Err(Fail(reason, input)) => {
-        std::fs::create_dir_all(self.output_svg.parent().unwrap()).unwrap();
-        input.save_meta(&self.input_meta);
+        std::fs::create_dir_all(manifest.path.parent().unwrap()).unwrap();
         let (input, meta) = input.split();
-        input.save_to_file(&self.input_graph);
-        input.save_svg_with_layout(&self.input_svg, self.layout);
+        manifest.to_file().unwrap();
+        manifest.write_input(&input).unwrap();
+        manifest.write_input_graph(&input, self.layout).unwrap();
+        manifest.write_meta::<V>(&meta).unwrap();
         let mut graph = input.build();
-        V::run_test(&test, (&mut graph, meta)).ok();
-        graph.viz().save_svg_with_layout(&self.output_svg, self.layout);
+        manifest.write_output_graph(&graph, self.layout).unwrap();
+        V::run_test(test, (&mut graph, meta)).ok();
+        manifest.write_output_graph(&graph, self.layout).unwrap();
         eprintln!("{}", reason.message());
         panic!("test case failure");
       }
@@ -182,20 +290,54 @@ impl GraphTestRunner {
     }
   }
 
+  pub fn skip_regressions(&mut self) {
+    self.skip_regressions = true;
+  }
+
+  pub fn deterministic(&mut self) { self.deterministic = true; }
+
+  fn find_regressions<V: TestInput>(&self) -> anyhow::Result<Vec<TestManifest>> {
+    let search_path = test_regressions_dir().join(self.id);
+    let mut search_path = search_path.into_os_string().into_string().unwrap();
+    search_path.push_str("/*.manifest.json");
+    glob::glob(&search_path).unwrap()
+      .map(|p| {
+        let idx = true_stem(&p?).unwrap().parse()?;
+        Ok(self.manifest(Regression(idx)))
+      })
+      .collect()
+  }
+
+  pub fn run_regressions<V: TestInput>(&self, test: V::TestFunction) {
+    for manifest in self.find_regressions::<V>().unwrap() {
+      println!("running regression: {:?}", &manifest.path);
+      self.run_with_existing::<V>(manifest, test);
+    }
+  }
 
   pub fn debug<V>(&self, test: V::TestFunction)
     where
       V: TestInput,
   {
-    let input = GraphSpec::load_from_file(&self.input_graph).pretty_unwrap();
-    let (input, meta) = V::load_meta(input, &self.input_meta).split();
+    self.run_with_existing::<V>(self.manifest(GraphTestMode::Debug), test);
+  }
+
+  fn run_with_existing<V>(&self, manifest: TestManifest, test: V::TestFunction)
+    where
+      V: TestInput,
+  {
+    dbg!(&manifest);
+    let input = manifest.load_input().unwrap();
+    let meta = manifest.load_meta::<V>().unwrap();
     let mut graph = input.build();
 
-    match V::run_test(&test, (&mut graph, meta)) {
+    match V::run_test(test, (&mut graph, meta)) {
       Err(TestCaseError::Reject(reason)) => {
         unreachable!()
       }
       Err(TestCaseError::Fail(reason)) => {
+        manifest.write_input_graph(&input, self.layout);
+        manifest.write_output_graph(&graph, self.layout);
         panic!("test case failure: {}", reason.message());
       }
       Ok(()) => {}
@@ -258,6 +400,22 @@ macro_rules! graph_tests {
         graph_tests!(@KW $runner : $($tail)*);
       )*
     };
+
+    (@KW $runner:ident : skip_regressions $(, $($tail:tt)* )?) => {
+      $runner.skip_regressions();
+      // $(stringify!($($tail)*);)*;
+      $(
+        graph_tests!(@KW $runner : $($tail)*);
+      )*
+    };
+
+    (@KW $runner:ident : deterministic $(, $($tail:tt)* )?) => {
+      $runner.deterministic();
+      // $(stringify!($($tail)*);)*;
+      $(
+        graph_tests!(@KW $runner : $($tail)*);
+      )*
+    };
   }
 
 #[macro_export]
@@ -277,6 +435,53 @@ macro_rules! graph_test_dbg {
         }
       };
   }
+
+#[macro_export]
+macro_rules! prop_assert_matches {
+    ($e:expr, $( $pattern:pat )|+ $( if $guard: expr )?) => {{
+        let e = $e;
+        let patt_s = stringify!($( $pattern )|+ $( if $guard )?);
+        proptest::prop_assert!(
+            matches!($e, $( $pattern )|+ $( if $guard )?),
+            "assertion failed: `{:?}` does not match {}`",
+            e, patt_s);
+    }};
+}
+
+fn true_stem<'a, P: AsRef<Path>>(path: &'a P) -> Option<&'a str> {
+  path.as_ref().file_name()?.to_str()?.split('.').next()
+}
+
+pub fn mark_failed_as_regression() -> anyhow::Result<()> {
+  let mut pattern = test_failures_dir().to_str().unwrap().to_string();
+  pattern.push_str("/*.manifest.json");
+
+  for p in glob::glob(&pattern)? {
+    let p = p?;
+    let test_id = true_stem(&p).unwrap();
+    let src = TestManifest::from_file(&p)?;
+    let mut patt = test_regressions_dir().join(test_id).into_os_string().into_string().unwrap();
+    patt.push_str("/*.manifest.json");
+    dbg!(&patt);
+    let mut idx = 0;
+    for file in glob::glob(&patt)? {
+      let existing_index = true_stem(&file?)
+          .map(|s| s.parse::<u32>().ok()).flatten();
+      dbg!(existing_index);
+      if existing_index == Some(idx) {
+        idx += 1;
+      } else {
+        break;
+      }
+    }
+    let dest = TestManifest::new(test_id, GraphTestMode::Regression(idx));
+    src.migrate_input_files(&dest)?;
+    std::fs::remove_file(src.path)?;
+    dest.to_file()?;
+  }
+
+  Ok(())
+}
 
 pub trait PrettyUnwrap {
   type Value;
