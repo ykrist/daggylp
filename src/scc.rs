@@ -267,7 +267,7 @@ mod tests {
     }
   }
 
-  fn multi_scc_graph() -> impl Strategy<Value=(GraphSpec, SccSizeOrder)> {
+  fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphSpec, SccSizeOrder)> {
     let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
     prop::collection::vec(scc, 1..=50)
       .prop_map(|sccs| {

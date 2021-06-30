@@ -10,7 +10,7 @@ pub use test_cases::generate_test_cases;
 use crate::viz::{GraphViz, LayoutAlgo};
 use crate::graph::Graph;
 
-use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailurePersistence};
+use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailurePersistence, TestRunner as PropTestRunner};
 use proptest::prelude::*;
 use std::path::{PathBuf, Path};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
@@ -18,6 +18,8 @@ use crate::test_utils::strategy::SccKind;
 use glob::MatchOptions;
 use std::borrow::Cow;
 use crate::test_utils::GraphTestMode::Regression;
+use std::sync::mpsc;
+pub use strategy::SharableStrategy;
 
 use anyhow::Context;
 use std::ffi::OsString;
@@ -101,7 +103,6 @@ impl TestManifest {
 
   fn migrate_input_files(&self, dest: &Self) -> anyhow::Result<()> {
     use std::fs::copy;
-    dbg!(&self, &dest);
     let mut src_path = self.path.to_path_buf();
     let mut dest_path = dest.path.to_path_buf();
 
@@ -161,6 +162,7 @@ impl TestManifest {
 
 pub struct GraphTestRunner<'a> {
   id: &'a str,
+  cpus: u32,
   skip_regressions: bool,
   deterministic: bool,
   layout: LayoutAlgo,
@@ -220,12 +222,14 @@ enum GraphTestMode {
 impl<'a> GraphTestRunner<'a> {
   pub fn new_with_layout_prog(id: &'a str, layout: LayoutAlgo) -> Self {
     let mut config = ProptestConfig::with_cases(1000);
+    // keep track of regressions ourselves, since we have a unified input format
     config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
-    // TODO keep track of regressions ourselves, since we have a unified input format
     config.result_cache = prop::test_runner::basic_result_cache;
-
+    config.max_shrink_iters = 50_000;
+    config.max_shrink_time = 30_000; // in millis
     GraphTestRunner {
       id,
+      cpus: 1,
       skip_regressions: false,
       deterministic: false,
       layout,
@@ -233,46 +237,22 @@ impl<'a> GraphTestRunner<'a> {
     }
   }
 
-  fn manifest(&self, mode: GraphTestMode) -> TestManifest {
-    TestManifest::new(self.id, mode)
-  }
-
-
   pub fn new(id: &'a str) -> Self {
     Self::new_with_layout_prog(id, LayoutAlgo::Dot)
   }
 
-  pub fn run<V, S>(&self, strategy: S, test: V::TestFunction)
-    where
-      V: TestInput,
-      S: Strategy<Value=V>,
-  {
-    if !self.skip_regressions {
-      self.run_regressions::<V>(test);
-    }
+  fn manifest(&self, mode: GraphTestMode) -> TestManifest {
+    TestManifest::new(self.id, mode)
+  }
 
+  fn handle_test_result<V: TestInput>(&self, result: Result<(), TestError<V>>, test: V::TestFunction) {
     use TestError::*;
-    let mut runner = if self.deterministic {
-      prop::test_runner::TestRunner::new_with_rng(
-        self.config.clone(),
-        prop::test_runner::TestRng::deterministic_rng(self.config.rng_algorithm)
-      )
-    } else {
-      prop::test_runner::TestRunner::new(self.config.clone())
-    };
-    let result = runner.run(&strategy, |input| {
-      let (mut graph_spec, meta) = input.split();
-      let mut g = graph_spec.build();
-      V::run_test(test, (&mut g, meta))
-    });
-
-    let manifest = self.manifest(GraphTestMode::Proptest);
-
     match result {
       Err(Abort(reason)) => {
         panic!("test aborted: {}", reason.message());
       }
       Err(Fail(reason, input)) => {
+        let manifest = self.manifest(GraphTestMode::Proptest);
         std::fs::create_dir_all(manifest.path.parent().unwrap()).unwrap();
         let (input, meta) = input.split();
         manifest.to_file().unwrap();
@@ -290,11 +270,101 @@ impl<'a> GraphTestRunner<'a> {
     }
   }
 
-  pub fn skip_regressions(&mut self) {
-    self.skip_regressions = true;
+  pub fn run<V, S>(&self, strategy: S, test: V::TestFunction)
+    where
+      V: TestInput + Send + 'static, // TODO could remove Send + 'static and let caller determine if they want to run parallel
+      V::TestFunction: Send + 'static,
+      S: SharableStrategy<Value=V>,
+  {
+    if !self.skip_regressions {
+      self.run_regressions::<V>(test);
+    }
+
+    if self.cpus > 1 {
+      return self.run_parallel(strategy, test)
+    }
+
+    let mut runner = if self.deterministic {
+      prop::test_runner::TestRunner::new_with_rng(
+        self.config.clone(),
+        prop::test_runner::TestRng::deterministic_rng(self.config.rng_algorithm)
+      )
+    } else {
+      prop::test_runner::TestRunner::new(self.config.clone())
+    };
+    let result = runner.run(&strategy, |input| {
+      let (mut graph_spec, meta) = input.split();
+      let mut g = graph_spec.build();
+      V::run_test(test, (&mut g, meta))
+    });
+    self.handle_test_result(result, test);
   }
 
-  pub fn deterministic(&mut self) { self.deterministic = true; }
+  fn run_parallel<V, S>(&self, strategy: S, test: V::TestFunction)
+    where
+      V: TestInput + Send + 'static,
+      V::TestFunction: Send + 'static,
+      S: SharableStrategy<Value=V>,
+  {
+    use std::sync::mpsc;
+    use TestError::*;
+
+    if self.deterministic {
+      eprintln!("warning: running with multiple CPUS doesn't make sense, running non-deterministically.");
+    }
+
+    let worker_threads : Vec<_> = (0..self.cpus).map(|_| {
+      let config = self.config.clone();
+      let strategy = strategy.clone();
+
+      std::thread::spawn(move || {
+        let mut runner = PropTestRunner::new(config);
+        runner.run(&strategy, |input| {
+          let (mut graph_spec, meta) = input.split();
+          let mut g = graph_spec.build();
+          V::run_test(test, (&mut g, meta))
+        })
+      })
+    }).collect();
+
+    let mut test_result = None;
+    let mut thread_panic = None;
+    for t in worker_threads {
+      match t.join() {
+        Ok(r) => {
+          if test_result.is_none() {
+            test_result = Some(r);
+          }
+        },
+        Err(panic) => thread_panic = Some(panic),
+      }
+    }
+
+    if let Some(panic) = thread_panic {
+      std::panic::resume_unwind(panic);
+    }
+
+    self.handle_test_result(test_result.unwrap(), test);
+  }
+
+  pub fn skip_regressions(&mut self, skip: bool) {
+    self.skip_regressions = skip;
+  }
+
+  pub fn deterministic(&mut self, det: bool) { self.deterministic = det; }
+
+  pub fn cpus(&mut self, cpus: u32) {
+    assert!(cpus > 0);
+    self.cpus = cpus;
+  }
+  pub fn layout(&mut self, l: LayoutAlgo) {
+    self.layout = l;
+  }
+
+  pub fn cases(&mut self, n: u32) {
+    self.config.cases = n;
+  }
+
 
   fn find_regressions<V: TestInput>(&self) -> anyhow::Result<Vec<TestManifest>> {
     let search_path = test_regressions_dir().join(self.id);
@@ -313,6 +383,7 @@ impl<'a> GraphTestRunner<'a> {
       println!("running regression: {:?}", &manifest.path);
       self.run_with_existing::<V>(manifest, test);
     }
+    println!("finished running regressions")
   }
 
   pub fn debug<V>(&self, test: V::TestFunction)
@@ -326,7 +397,6 @@ impl<'a> GraphTestRunner<'a> {
     where
       V: TestInput,
   {
-    dbg!(&manifest);
     let input = manifest.load_input().unwrap();
     let meta = manifest.load_meta::<V>().unwrap();
     let mut graph = input.build();
@@ -344,13 +414,7 @@ impl<'a> GraphTestRunner<'a> {
     }
   }
 
-  pub fn layout(&mut self, l: LayoutAlgo) {
-    self.layout = l;
-  }
 
-  pub fn cases(&mut self, n: u32) {
-    self.config.cases = n;
-  }
 }
 
 
@@ -387,7 +451,6 @@ macro_rules! graph_tests {
 
     (@KW $runner:ident : layout = $layout:expr $( , $($tail:tt)* )? ) => {
       $runner.layout($layout);
-      // $(stringify!($($tail)*);)*;
       $(
         graph_tests!(@KW $runner : $($tail)*);
       )*
@@ -395,7 +458,6 @@ macro_rules! graph_tests {
 
     (@KW $runner:ident : cases = $n:expr $(, $($tail:tt)* )?) => {
       $runner.cases($n);
-      // $(stringify!($($tail)*);)*;
       $(
         graph_tests!(@KW $runner : $($tail)*);
       )*
@@ -403,7 +465,6 @@ macro_rules! graph_tests {
 
     (@KW $runner:ident : skip_regressions $(, $($tail:tt)* )?) => {
       $runner.skip_regressions();
-      // $(stringify!($($tail)*);)*;
       $(
         graph_tests!(@KW $runner : $($tail)*);
       )*
@@ -411,7 +472,13 @@ macro_rules! graph_tests {
 
     (@KW $runner:ident : deterministic $(, $($tail:tt)* )?) => {
       $runner.deterministic();
-      // $(stringify!($($tail)*);)*;
+      $(
+        graph_tests!(@KW $runner : $($tail)*);
+      )*
+    };
+
+    (@KW $runner:ident : parallel = $n:literal $(, $($tail:tt)* )?) => {
+      $runner.cpus($n);
       $(
         graph_tests!(@KW $runner : $($tail)*);
       )*
@@ -462,12 +529,10 @@ pub fn mark_failed_as_regression() -> anyhow::Result<()> {
     let src = TestManifest::from_file(&p)?;
     let mut patt = test_regressions_dir().join(test_id).into_os_string().into_string().unwrap();
     patt.push_str("/*.manifest.json");
-    dbg!(&patt);
     let mut idx = 0;
     for file in glob::glob(&patt)? {
       let existing_index = true_stem(&file?)
           .map(|s| s.parse::<u32>().ok()).flatten();
-      dbg!(existing_index);
       if existing_index == Some(idx) {
         idx += 1;
       } else {

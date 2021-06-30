@@ -311,10 +311,10 @@ impl Graph {
 
           if let Some(p) = p {
             let num_path_edges = p.num_edges(e.from);
-            let iis = smallest_iis.get_or_insert_with(|| Iis::with_capacity(num_path_edges + 1));
+            let iis = smallest_iis.get_or_insert_with(|| Iis::with_capacity(self, num_path_edges + 1));
             iis.clear();
-            iis.add_backwards_path(p.iter_nodes(e.from).map(|n| self.var_from_node_id(n)), false);
-            iis.add_constraint(Constraint::Edge(self.var_from_node_id(e.from), self.var_from_node_id(e.to)));
+            iis.edges.insert((e.from, e.to));
+            iis.add_backwards_path(p.iter_nodes(e.from), false);
             if !smallest {
               return smallest_iis;
             } else {
@@ -336,13 +336,14 @@ impl Graph {
       let p1 = self.shortest_path_scc::<ForwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
       let p2 = self.shortest_path_scc::<BackwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
 
-      let mut iis = Iis::with_capacity(p1.num_edges(dest) + p2.num_edges(dest) /* - 1 - 1 + 2 */);
+      let n_edges = p1.num_edges(dest) + p2.num_edges(dest);
+      let mut iis = Iis::with_capacity(self, n_edges);
 
       // p1.iter_nodes(): ub_node <- ... <- lb_node
-      iis.add_backwards_path(p1.iter_nodes(dest).map(|n| self.var_from_node_id(n)), true);
+      iis.add_backwards_path(p1.iter_nodes(dest), true);
       // p2.iter_nodes(): ub_node -> ... -> lb_node
-      iis.add_forwards_path(p2.iter_nodes(dest).map(|n| self.var_from_node_id(n)), false);
-      debug_assert_eq!(iis.constrs.capacity(), iis.constrs.len());
+      iis.add_forwards_path(p2.iter_nodes(dest), false);
+      debug_assert_eq!(iis.edges.len(), n_edges);
       iis
     })
   }
@@ -384,12 +385,12 @@ impl Graph {
           let p1 = paths_there.iter_nodes(best_dest);
           // dst -> j1 ... jk -> src
           let p2 = paths_back.iter_nodes(best_dest);
-          let iis_size = p2.size_hint().0 + p1.size_hint().0; /* - 2  +  2 (bounds)  */
-          let iis = best_iis.get_or_insert_with(|| Iis::with_capacity(iis_size));
+          let n_edges = p2.size_hint().0 + p1.size_hint().0 - 2; /* - 1 - 1 (bounds)  */
+          let iis = best_iis.get_or_insert_with(|| Iis::with_capacity(self, n_edges));
           iis.clear();
-          iis.add_backwards_path(p1.map(|n| self.var_from_node_id(n)), true);
-          iis.add_forwards_path(p2.map(|n| self.var_from_node_id(n)), false);
-          debug_assert_eq!(iis_size, iis.constrs.len());
+          iis.add_backwards_path(p1, true);
+          iis.add_forwards_path(p2, false);
+          debug_assert_eq!(n_edges, iis.edges.len());
           global_path_prune.update_bound(|_| iis.len() as u32 - 2);
         }
       }
@@ -405,17 +406,17 @@ mod tests {
   #[macro_use]
   use crate::*;
 
-  use crate::test_utils::*;
+  use crate::test_utils::{*, strategy::SharableStrategy};
   use crate::graph::{ModelState, Graph};
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
   use crate::test_utils::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
   use crate::viz::LayoutAlgo;
-  use std::panic::panic_any;
 
-  fn cei_triangular_graph() -> impl Strategy<Value=GraphSpec> {
-    (3..200usize).prop_flat_map(|mut size| {
+  fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+    (3..200usize)
+      .prop_flat_map(|mut size| {
       // ensure the graph has enough nodes that the last row (highest rank) doesn't
       // have any lonely nodes (otherwise we don't have a SCC graph)
       let last_node = size - 1;
@@ -423,14 +424,15 @@ mod tests {
       if last_node < triangular_number(rank - 1) + 2 {
         size += 1;
       }
-      set_arbitrary_edge_to_one(graph_with_conn(size, Triangular(), default_nodes(), Just(0)))
+      set_arbitrary_edge_to_one(graph_with_conn(default_nodes(size), Triangular(), Just(0)))
     })
   }
 
-  fn cbi_triangular_graph() -> impl Strategy<Value=GraphSpec> {
-    (1..=13usize).prop_flat_map(|mut rank| {
+  fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+    (1..=13usize)
+      .prop_flat_map(|mut rank| {
       let size = triangular_number(rank) + 1;
-      graph_with_conn(size, Triangular(), Just(NodeData { lb: 0, ub: 4, obj: 0 }), Just(0))
+      graph_with_conn(prop::collection::vec(Just(NodeData { lb: 0, ub: 4, obj: 0 }), size), Triangular(), Just(0))
     })
       .prop_map(|mut g| {
         g.nodes.last_mut().unwrap().lb = 2;

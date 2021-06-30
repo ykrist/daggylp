@@ -20,7 +20,7 @@ impl fmt::Debug for NodeData {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GraphSpec {
   pub nodes: Vec<NodeData>,
   pub edges: FnvHashMap<(usize, usize), Weight>,
@@ -119,6 +119,9 @@ impl GraphSpec {
           parse_edges = true;
         }
         line => {
+          if line.trim().starts_with("//") {
+            continue;
+          }
           let mut tok = line.split_whitespace();
           if parse_edges {
             let i: usize = tok.next().unwrap().parse().unwrap();

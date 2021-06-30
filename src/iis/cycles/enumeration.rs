@@ -218,12 +218,11 @@ impl<'a, I> Iterator for CyclicIisIter<'a, I>
         None => continue,
         Some(kind) => {
           println!("inf: {:?}", &cycle);
-          let mut iis = Iis::from_cycle(cycle.iter().map(|n| self.graph.var_from_node_id(*n)));
+          let mut iis = Iis::from_cycle(self.graph, cycle.iter().copied());
           match kind {
             CyclicInfKind::Pure => {}
             CyclicInfKind::Bounds(bi) => {
-              iis.add_constraint(Constraint::Ub(self.graph.var_from_node_id(bi.ub_node)));
-              iis.add_constraint(Constraint::Lb(self.graph.var_from_node_id(bi.lb_node)));
+              iis.add_bounds(bi.lb_node, bi.ub_node);
             }
             CyclicInfKind::Unknown => unreachable!(),
           }
@@ -326,14 +325,6 @@ mod tests {
   use crate::test_utils::strategy::*;
   use crate::*;
 
-
-
-  fn cycle_graph(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-    (2..1000usize).prop_flat_map(move |size|
-      strategy::graph_with_conn(size, Cycle::new(), nodes.clone(), 0..strategy::MAX_EDGE_WEIGHT))
-  }
-
-
   enum Tests {}
   impl Tests {
     fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> TestCaseResult {
@@ -397,9 +388,9 @@ mod tests {
 
   graph_tests!(
     Tests;
-    set_arbitrary_edge_to_one(complete_graph_zero_edges(Just(NodeData{lb: 0, ub: 1, obj: 0})))
+    set_arbitrary_edge_to_one(complete_graph_zero_edges(default_nodes(2..=8)))
       => count_cycles_and_iis_complete_graph [layout=LayoutAlgo::Fdp];
-    cycle_graph(Just(NodeData{lb: 0, ub: 1, obj: 0}))
+    graph_with_conn(default_nodes(2..1000), Cycle::new(), any_edge_weight())
       => count_cycles_and_iis_cycle_graph [layout=LayoutAlgo::Fdp];
   );
 }

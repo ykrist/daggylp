@@ -1,4 +1,6 @@
-use proptest::prelude::*;
+// use proptest::prelude::*;
+use proptest as prop;
+use proptest::{prop_oneof, prelude::{Just, any}};
 use super::generators::*;
 use crate::graph::Weight;
 use fnv::FnvHashMap;
@@ -10,6 +12,25 @@ use crate::viz::GraphViz;
 use std::fmt::Debug;
 use std::cmp::min;
 use crate::test_utils::SccGraphConn::Sq;
+use prop::strategy::Strategy as ProptestStrategy;
+use proptest::strategy::ValueTree;
+use proptest::sample::SizeRange;
+
+pub trait SharableStrategy: ProptestStrategy<Value=<Self as SharableStrategy>::Value, Tree=<Self as SharableStrategy>::Tree> + Clone + Send + Sync + 'static {
+  type Value: Send + Sync + 'static;
+  type Tree: Debug + Clone + ValueTree<Value=<Self as SharableStrategy>::Value>;
+}
+
+impl<V, T, S> SharableStrategy for S
+  where
+    V: Send + Sync + 'static,
+    T: Debug + Clone + ValueTree<Value=V>,
+    S: ProptestStrategy<Value=V, Tree=T> + Clone + Send + Sync + 'static
+{
+  type Value = V;
+  type Tree = T;
+}
+
 
 #[derive(Debug, Copy, Clone)]
 pub enum SccKind {
@@ -21,7 +42,7 @@ pub enum SccKind {
 impl SccKind {
   pub fn feasible(&self) -> bool { matches!(self, SccKind::Feasible) }
 
-  pub fn any() -> impl Strategy<Value=Self> {
+  pub fn any() -> impl SharableStrategy<Value=Self> {
     prop_oneof![
       Just(SccKind::Feasible),
       Just(SccKind::InfEdge),
@@ -40,37 +61,66 @@ struct EdgeData {
 
 type EdgeMap = FnvHashMap<(usize, usize), Weight>;
 
-fn assign_edge_weights(mut edges: EdgeMap, weights: Vec<Weight>) -> EdgeMap {
-  for (weight, w) in edges.values_mut().zip(weights) {
-    *weight = w;
-  }
-  edges
+
+pub fn node(lb: Weight, ub: Weight, obj: Weight) -> NodeData {
+  NodeData { lb, ub, obj }
 }
 
-pub fn node(bounds: impl Strategy<Value=(Weight, Weight)> + Clone, obj: impl Strategy<Value=Weight> + Clone) -> impl Strategy<Value=NodeData> + Clone {
-  (obj, bounds).prop_map(|(obj, (lb, ub))| NodeData { lb, ub, obj })
+pub fn nodes(lb: impl SharableStrategy<Value=Weight>,
+             ub: impl SharableStrategy<Value=Weight>,
+             obj: impl SharableStrategy<Value=Weight>) -> impl SharableStrategy<Value=NodeData> {
+  (lb, ub, obj).prop_map(|(mut lb,mut ub, obj)| {
+    if lb > ub { std::mem::swap(&mut lb, &mut ub); }
+    NodeData { lb, ub, obj }
+  })
 }
 
-pub fn default_nodes() -> impl Strategy<Value=NodeData> + Clone {
-  Just(NodeData { lb: 0, ub: 1, obj: 0 })
+pub fn default_nodes(size: impl Into<SizeRange>) -> impl SharableStrategy<Value=Vec<NodeData>> {
+  prop::collection::vec(
+    Just(NodeData { lb: 0, ub: 1, obj: 0 }),
+    size,
+  )
+}
+
+pub fn any_nodes(size: impl Into<SizeRange>) -> impl SharableStrategy<Value=Vec<NodeData>> {
+  prop::collection::vec(
+    nodes(MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT, 0..=MAX_WEIGHT),
+    size,
+  )
+}
+pub fn any_bounds_nodes(size: impl Into<SizeRange>) -> impl SharableStrategy<Value=Vec<NodeData>> {
+  prop::collection::vec(
+    nodes(MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT, Just(0)),
+    size,
+  )
+}
+
+pub fn any_edge_weight() -> impl SharableStrategy<Value=Weight> { 0..MAX_EDGE_WEIGHT }
+
+fn edge_iter(n: usize) -> impl Iterator<Item=(usize, usize)> {
+  (0..n).flat_map(move |i| (0..n).map(move |j| (i, j))).filter(|(i, j)| i != j)
+}
+
+fn acyclic_edge_iter(n: usize) -> impl Iterator<Item=(usize, usize)> {
+  (0..n).flat_map(move |i| (i + 1..n).map(move |j| (i, j)))
 }
 
 pub fn graph_with_conn(
-  size: usize,
-  mut conn: impl Connectivity,
-  nodes: impl Strategy<Value=NodeData> + Clone,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
-) -> impl Strategy<Value=GraphSpec>
+  nodes: impl SharableStrategy<Value=Vec<NodeData>>,
+  mut conn: impl Connectivity + Clone + Send + Sync + 'static,
+  edge_weights: impl SharableStrategy<Value=Weight>,
+) -> impl SharableStrategy<Value=GraphSpec>
 {
-  assert!(size > 0);
-  conn.set_size(size, size * (size - 1));
-  let nodes = vec![nodes; size];
-  let edges: Vec<_> = (0..size).flat_map(|i| (0..size).map(move |j| (i, j)))
-    .filter(move |&(i, j)| i != j && conn.connected(i, j))
-    .collect();
-  let edge_weights = vec![edge_weights; edges.len()];
-
-  (nodes, Just(edges), edge_weights).prop_map(|(nodes, edges, edge_weights)|
+  nodes.prop_ind_flat_map2(move |nodes: Vec<NodeData>| {
+    let size = nodes.len();
+    let mut conn = conn.clone();
+    conn.set_size(size, size * (size - 1));
+    let edges: Vec<_> = edge_iter(size)
+      .filter(|&(i, j)| conn.connected(i, j))
+      .collect();
+    let weights = vec![edge_weights.clone(); edges.len()];
+    (Just(edges), weights)
+  }).prop_map(|(nodes, (edges, edge_weights))|
     GraphSpec {
       nodes,
       edges: edges.into_iter().zip(edge_weights).collect(),
@@ -80,10 +130,10 @@ pub fn graph_with_conn(
 
 fn graph_with_edgelist(
   size: usize,
-  nodes: impl Strategy<Value=NodeData> + Clone,
+  nodes: impl SharableStrategy<Value=NodeData> + Clone,
   edge_list: Vec<(usize, usize)>,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
-) -> impl Strategy<Value=GraphSpec> {
+  edge_weights: impl SharableStrategy<Value=Weight> + Clone,
+) -> impl SharableStrategy<Value=GraphSpec> {
   let n_edges = edge_list.len();
   (vec![nodes; size], Just(edge_list), vec![edge_weights; n_edges])
     .prop_map(|(nodes, edge_list, weights)| {
@@ -93,65 +143,70 @@ fn graph_with_edgelist(
 }
 
 pub fn acyclic_graph(
-  size: usize,
-  nodes: impl Strategy<Value=NodeData> + Clone,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
-) -> impl Strategy<Value=GraphSpec>
+  nodes: impl SharableStrategy<Value=Vec<NodeData>>,
+  edge_weights: impl SharableStrategy<Value=Weight>,
+) -> impl SharableStrategy<Value=GraphSpec>
 {
-  assert!(size > 0);
-  vec![any::<bool>(); size * (size - 1) / 2]
-    .prop_map(move |sparsity_pattern: Vec<bool>| {
-      (0..size).flat_map(|i| (i + 1..size).map(move |j| (i, j)))
-        .zip(sparsity_pattern)
-        .filter_map(|(edge, is_present)| if is_present { Some(edge) } else { None })
-        .collect::<Vec<_>>()
+  nodes
+    .prop_ind_flat_map2(move |nodes: Vec<NodeData>| {
+      let size = nodes.len();
+      vec![prop::option::weighted(0.2, edge_weights.clone()); (size * (size - 1)) / 2]
     })
-    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
-      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
-    )
+    .prop_map(|(nodes, edges)| {
+      let edges = edges.into_iter()
+        .zip(acyclic_edge_iter(nodes.len()))
+        .filter_map(|(w, e)| w.map(|w| (e, w)))
+        .collect();
+      GraphSpec { edges, nodes }
+    })
 }
 
 pub fn connected_acyclic_graph(
-  size: usize,
-  nodes: impl Strategy<Value=NodeData> + Clone,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
-) -> impl Strategy<Value=GraphSpec>
+  nodes: impl SharableStrategy<Value=Vec<NodeData>>,
+  edge_weights: impl SharableStrategy<Value=Weight>,
+) -> impl SharableStrategy<Value=GraphSpec>
 {
-  assert!(size > 0);
-  vec![any::<bool>(); size * (size - 1) / 2]
-    .prop_map(move |sparsity_pattern: Vec<bool>| {
-      (0..size).flat_map(|i| (i + 1..size).map(move |j| (i, j)))
-        .zip(sparsity_pattern)
-        .filter_map(|((i,j), is_present)| {
-          if i + 1== j || is_present  { Some((i,j)) } else { None }
-        })
-        .collect::<Vec<_>>()
+  nodes
+    .prop_ind_flat_map2(move |nodes: Vec<NodeData>| {
+      let size = nodes.len();
+      vec![prop::option::weighted(0.2, edge_weights.clone()); (size * (size - 1)) / 2]
     })
-    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
-      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
-    )
+    .prop_map(|(nodes, edges)| {
+      let edges = edges.into_iter()
+        .zip(acyclic_edge_iter(nodes.len()))
+        .filter_map(|(mut w, (i, j))| {
+          if i + 1 == j {
+            w = w.or(Some(0));
+          }
+          w.map(|w| ((i, j), w))
+        })
+        .collect();
+      GraphSpec { edges, nodes }
+    })
 }
 
 pub fn graph(
-  size: usize,
-  nodes: impl Strategy<Value=NodeData> + Clone,
-  edge_weights: impl Strategy<Value=Weight> + Clone,
-) -> impl Strategy<Value=GraphSpec>
+  nodes: impl SharableStrategy<Value=Vec<NodeData>>,
+  edge_weights: impl SharableStrategy<Value=Weight> + Clone,
+) -> impl SharableStrategy<Value=GraphSpec>
 {
-  assert!(size > 0);
-  vec![any::<bool>(); size * (size - 1)]
-    .prop_map(move |sparsity_pattern: Vec<bool>| {
-      (0..size).flat_map(|i| (0..size).map(move |j| (i, j))).filter(|(i, j)| i != j)
-        .zip(sparsity_pattern)
-        .filter_map(|(edge, is_present)| if is_present { Some(edge) } else { None })
-        .collect::<Vec<_>>()
+  nodes
+    .prop_ind_flat_map2(move |nodes: Vec<NodeData>| {
+      let size = nodes.len();
+      vec![prop::option::weighted(0.2, edge_weights.clone()); (size * (size - 1))]
     })
-    .prop_flat_map(move |edge_list: Vec<(usize, usize)>|
-      graph_with_edgelist(size, nodes.clone(), edge_list, edge_weights.clone())
-    )
+    .prop_map(|(nodes, edges)| {
+      let edges = edges.into_iter()
+        .zip(edge_iter(nodes.len()))
+        .filter_map(|(mut w, (i, j))|
+          w.map(|w| ((i, j), w))
+        )
+        .collect();
+      GraphSpec { edges, nodes }
+    })
 }
 
-pub const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 2;
+pub const MAX_EDGE_WEIGHT: Weight = Weight::MAX / 1_000_000;
 pub const MAX_WEIGHT: Weight = MAX_EDGE_WEIGHT;
 pub const MIN_WEIGHT: Weight = -MAX_WEIGHT;
 
@@ -177,16 +232,15 @@ pub const MIN_WEIGHT: Weight = -MAX_WEIGHT;
 // //     .prop_map(|lb, ub|)
 // // }
 //
-pub fn complete_graph_zero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (2..=8usize).prop_flat_map(move |size| graph_with_conn(size, AllEdges(), nodes.clone(), Just(0)))
+pub fn complete_graph_zero_edges(nodes: impl SharableStrategy<Value=Vec<NodeData>>) -> impl SharableStrategy<Value=GraphSpec> {
+  graph_with_conn(nodes, AllEdges(), Just(0))
 }
 
-pub fn complete_graph_nonzero_edges(nodes: impl Strategy<Value=NodeData> + Clone) -> impl Strategy<Value=GraphSpec> {
-  (2..=8usize).prop_flat_map(move |size| graph_with_conn(size, AllEdges(), nodes.clone(),
-                                                         (-MAX_EDGE_WEIGHT..=MAX_EDGE_WEIGHT).prop_filter("nonzero edge", |w| w != &0)))
+pub fn complete_graph_nonzero_edges(nodes: impl SharableStrategy<Value=Vec<NodeData>>) -> impl SharableStrategy<Value=GraphSpec> {
+  graph_with_conn(nodes, AllEdges(), 1..=MAX_EDGE_WEIGHT)
 }
 
-pub fn scc_graph_conn(size: usize) -> impl Strategy<Value=SccGraphConn> {
+pub fn scc_graph_conn(size: usize) -> impl SharableStrategy<Value=SccGraphConn> {
   let tri = if Triangular::strongly_connected(size) { 1 } else { 0 };
   let sq = if Square::strongly_connected(size) { 1 } else { 0 };
   let complete = if size < 9 { 1 } else { 0 };
@@ -199,15 +253,16 @@ pub fn scc_graph_conn(size: usize) -> impl Strategy<Value=SccGraphConn> {
 }
 
 pub fn scc_graph(
-  size: usize,
+  size: impl Into<SizeRange>,
   feas: SccKind,
-) -> impl Strategy<Value=GraphSpec> {
+) -> impl SharableStrategy<Value=GraphSpec> {
   let nodes = match feas {
     SccKind::Feasible | SccKind::InfEdge =>
-      node((MIN_WEIGHT..=0, 0..=MAX_WEIGHT), Just(0)),
+      nodes(MIN_WEIGHT..=0, 0..=MAX_WEIGHT, Just(0)),
     SccKind::InfBound =>
-      node((MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT), Just(0)),
+      nodes(MIN_WEIGHT..=MAX_WEIGHT, MIN_WEIGHT..=MAX_WEIGHT, Just(0)),
   };
+  let nodes = prop::collection::vec(nodes, size);
   let edge_weights = match feas {
     SccKind::Feasible | SccKind::InfBound =>
       0..=0,
@@ -215,11 +270,11 @@ pub fn scc_graph(
       0..=MAX_EDGE_WEIGHT,
   };
 
-  scc_graph_conn(size)
-    .prop_flat_map(move |conn| {
-      println!("conn = {:?}", conn);
-      graph_with_conn(size, conn, nodes.clone(), edge_weights.clone())
-    })
+  nodes
+    .prop_ind_flat_map2(|nodes| scc_graph_conn(nodes.len()))
+    .prop_flat_map(move |(nodes, conn)|
+      graph_with_conn(Just(nodes), conn, edge_weights.clone())
+    )
     .prop_map(move |mut g| {
       match feas {
         SccKind::InfEdge => {
@@ -279,25 +334,28 @@ pub fn scc_graph(
 // }
 
 
-pub fn set_arbitrary_edge_to_one(graph: impl Strategy<Value=GraphSpec>) -> impl Strategy<Value=GraphSpec> {
-  (graph, any::<prop::sample::Selector>())
-    .prop_map(|(mut graph, selector)| {
-      let e = *selector.select(graph.edges.keys());
-      graph.edges.insert(e, 1);
+pub fn set_arbitrary_edge_to_one(graph: impl SharableStrategy<Value=GraphSpec>) -> impl SharableStrategy<Value=GraphSpec> {
+  graph.prop_ind_flat_map(|graph| {
+    let n_edges = graph.edges.len();
+    (Just(graph), 0usize..n_edges)
+  })
+    .prop_map(|(mut graph, i): (GraphSpec, _)| {
+      *graph.edges.values_mut().nth(i).unwrap() = 1;
       graph
     })
 }
 
 // fn cycle_chain_graph_zero_edges(subgraph_sizes: Vec<usize>, nodes: impl Strategy<Value=NodeData> + Clone) ->
 
-pub fn sample_strategy<T>(s: impl Strategy<Value=T>) -> T {
+pub fn sample_strategy<T>(s: impl SharableStrategy<Value=T>) -> T {
   use proptest::strategy::ValueTree;
   s.new_tree(&mut TestRunner::default()).unwrap().current()
 }
 
-//
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
-//   use crate::viz::GraphViz;
-// }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use proptest::prelude::*;
+
+}
