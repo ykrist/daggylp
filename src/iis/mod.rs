@@ -26,7 +26,7 @@ impl Iis {
     self.bounds = None;
   }
 
-  pub(crate) fn with_capacity(graph: &Graph, n_edges: usize) -> Self {
+  pub(crate) fn with_capacity<E>(graph: &Graph<E>, n_edges: usize) -> Self {
     Iis { edges: set_with_capacity(n_edges), bounds: None, graph_id: graph.graph_id() }
   }
 
@@ -34,7 +34,7 @@ impl Iis {
   /// Takes an iterator of nodes `a , b , c , ... ,y, z` and adds the edges
   ///
   ///  `(a -> b), (b -> c) ,...,(y -> z), (z -> a)`
-  pub(crate) fn from_cycle(graph: &Graph, nodes: impl IntoIterator<Item=usize>) -> Self {
+  pub(crate) fn from_cycle<E>(graph: &Graph<E>, nodes: impl IntoIterator<Item=usize>) -> Self {
     let mut vars = nodes.into_iter();
     let mut edges = set_with_capacity(vars.size_hint().0);
     let first: usize = vars.next().unwrap();
@@ -51,7 +51,7 @@ impl Iis {
   /// Takes an iterator of nodes `a , b , c , ... ,y,  z` and adds the edges
   ///
   ///  `(a <- b), (b <- c) ,...,(y <- z), (z <- a)`
-  pub(crate) fn from_cycle_backwards(graph: &Graph, nodes: impl IntoIterator<Item=usize>) -> Self {
+  pub(crate) fn from_cycle_backwards<E>(graph: &Graph<E>, nodes: impl IntoIterator<Item=usize>) -> Self {
     let mut vars = nodes.into_iter();
     let mut edges = set_with_capacity(vars.size_hint().0);
     let last: usize = vars.next().unwrap();
@@ -132,14 +132,14 @@ impl Iis {
 }
 
 impl Graph {
-  pub fn compute_iis(&mut self) -> Iis {
+  pub fn compute_iis(&mut self, minimal: bool) -> Iis {
     self.check_allowed_action(ModelAction::ComputeIis).unwrap();
     match &self.state {
       ModelState::InfPath(violated_ubs) => {
         self.compute_path_iis(violated_ubs)
       }
       ModelState::InfCycle { sccs, first_inf_scc } => {
-        self.compute_cyclic_iis(&sccs[*first_inf_scc..])
+        self.compute_cyclic_iis(minimal, &sccs[*first_inf_scc..])
       }
       _ => unreachable!()
     }

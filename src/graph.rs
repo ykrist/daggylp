@@ -8,10 +8,15 @@ use crate::scc::SccInfo;
 
 use std::cmp::min;
 use std::option::Option::Some;
-use std::iter::ExactSizeIterator;
-
+use std::iter::{ExactSizeIterator, Map};
+use crate::graph::ModelState::Unsolved;
+use std::borrow::Cow;
+use crate::test_utils::NodeData;
+use crate::edge_storage::{CsrEdgeStorage, EdgeDir, EdgeLookupBuilder};
+pub use crate::edge_storage::{EdgeLookup};
 
 pub type Weight = i64;
+type NodeIdx = usize;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum InfKind {
@@ -28,24 +33,25 @@ pub enum SolveStatus {
 #[derive(Debug, Clone)]
 pub(crate) enum ModelState {
   Unsolved,
-  InfCycle { sccs: Vec<FnvHashSet<usize>>, first_inf_scc: usize },
-  InfPath(Vec<usize>),
+  InfCycle { sccs: Vec<FnvHashSet<NodeIdx>>, first_inf_scc: usize },
+  InfPath(Vec<NodeIdx>),
   Optimal,
-  Mrs
+  Mrs,
+  Dirty { rebuild_sccs: bool },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EdgeKind {
   Regular,
-  SccIn(usize),
-  SccOut(usize),
-  SccToScc{ from: usize, to: usize }
+  SccIn(NodeIdx),
+  SccOut(NodeIdx),
+  SccToScc { from: NodeIdx, to: NodeIdx },
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Edge {
-  pub(crate) from: usize,
-  pub(crate) to: usize,
+  pub(crate) from: NodeIdx,
+  pub(crate) to: NodeIdx,
   pub(crate) weight: Weight,
   /// used for MRS calculation
   pub(crate) kind: EdgeKind,
@@ -62,7 +68,7 @@ pub enum Constraint {
 #[derive(Hash, Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Var {
   pub(crate) graph_id: u32,
-  pub(crate) node: usize,
+  pub(crate) node: NodeIdx,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -70,9 +76,9 @@ pub enum NodeKind {
   /// Regular node
   Var,
   /// Strongly-connected component Member, contains scc index
-  SccMember(usize),
+  SccMember(NodeIdx),
   /// Artificial SCC node, contains scc index
-  Scc(usize),
+  Scc(NodeIdx),
 }
 
 impl NodeKind {
@@ -86,9 +92,9 @@ impl NodeKind {
     self.is_scc()
   }
 
-  pub(crate) fn is_scc_member(&self) -> bool { matches!(self, NodeKind::SccMember(_))}
+  pub(crate) fn is_scc_member(&self) -> bool { matches!(self, NodeKind::SccMember(_)) }
 
-  pub(crate) fn is_scc(&self) -> bool { matches!(self, NodeKind::Scc(_))}
+  pub(crate) fn is_scc(&self) -> bool { matches!(self, NodeKind::Scc(_)) }
 }
 
 #[derive(Debug, Clone)]
@@ -97,186 +103,97 @@ pub struct Node {
   pub(crate) obj: Weight,
   pub(crate) lb: Weight,
   pub(crate) ub: Weight,
-  pub(crate) active_pred: Option<usize>,
+  pub(crate) active_pred: Option<NodeIdx>,
   pub(crate) kind: NodeKind,
 }
 
-
-pub struct Graph {
-  pub(crate) id: u32,
-  pub(crate) nodes: Vec<Node>,
-  pub(crate) sccs: Vec<SccInfo>,
-  pub(crate) num_active_nodes: usize,
-  pub(crate) edges_from: Vec<Vec<Edge>>,
-  pub(crate) edges_to: Vec<Vec<Edge>>,
-  pub(crate) source_nodes: Vec<usize>,
-  pub(crate) parameters: Parameters,
-  pub(crate) state: ModelState,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Parameters {
-  pub(crate) minimal_cyclic_iis: bool,
-  pub(crate) minimal_acyclic_iis: bool,
-  pub(crate) size_hint_vars: usize,
-  pub(crate) size_hint_constrs: usize,
-}
-
-impl Default for Parameters {
-  fn default() -> Self {
-    Parameters {
-      minimal_cyclic_iis: false,
-      minimal_acyclic_iis: true,
-      size_hint_vars: 0,
-      size_hint_constrs: 0,
+impl Node {
+  fn new(lb: Weight, ub: Weight, obj: Weight, kind: NodeKind) -> Self {
+    Node {
+      lb,
+      ub,
+      obj,
+      kind,
+      active_pred: None,
+      x: lb,
     }
   }
 }
 
-impl Parameters {
-  fn build() -> ParamBuilder { ParamBuilder { params: Default::default() } }
-}
-
-pub struct ParamBuilder {
-  params: Parameters,
-}
-
-impl ParamBuilder {
-  pub fn min_cyclic_iis(mut self, val: bool) -> Self {
-    self.params.minimal_cyclic_iis = val;
-    self
-  }
-
-  pub fn min_acyclic_iis(mut self, val: bool) -> Self {
-    self.params.minimal_acyclic_iis = val;
-    self
-  }
-
-  pub fn size_hint(mut self, n_vars: usize, n_constrs: usize) -> Self {
-    self.params.size_hint_vars = n_vars;
-    self.params.size_hint_constrs = n_constrs;
-    self
-  }
-
-  pub fn finish(self) -> Parameters { self.params }
-}
-
-pub struct GraphBuilder {}
-// once it's been finalised, not more adding of edges/nodes.  Only modification allowed is to remove
-// an edge.
-
-pub(crate) enum ForwardDir {}
-pub(crate) enum BackwardDir {}
-
-
-pub(crate) trait EdgeDir {
-  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) -> NeighboursIter<'a, Self>;
-
-  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize>;
-
-  fn is_forwards() -> bool;
-}
-
-pub(crate) struct NeighboursIter<'a, D: ?Sized> {
-  dir: std::marker::PhantomData<D>,
-  edges: std::slice::Iter<'a, Edge>,
-}
-
-impl EdgeDir for ForwardDir {
-  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) ->  NeighboursIter<'a, Self> {
-    NeighboursIter {
-      edges: graph.edges_from[node].iter(),
-      dir: std::marker::PhantomData
-    }
-  }
-
-  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize> {
-    edges.next().map(|e| e.to)
-  }
-
-  fn is_forwards() -> bool { true }
-}
-
-impl EdgeDir for BackwardDir {
-  fn new_neigh_iter<'a>(graph: &'a Graph, node: usize) ->  NeighboursIter<'a, Self> {
-    NeighboursIter {
-      edges: graph.edges_to[node].iter(),
-      dir: std::marker::PhantomData
-    }
-  }
-
-  fn next_neigh(edges: &mut std::slice::Iter<Edge>) -> Option<usize> {
-    edges.next().map(|e| e.from)
-  }
-
-  fn is_forwards() -> bool { false }
-}
-
-impl<D: EdgeDir> Iterator for NeighboursIter<'_, D> {
-  type Item = usize;
-  fn next(&mut self) -> Option<Self::Item> {
-    D::next_neigh(&mut self.edges)
-  }
-
-  fn size_hint(&self) -> (usize, Option<usize>) {
-    self.edges.size_hint()
-  }
-}
-
-impl<D: EdgeDir> ExactSizeIterator for NeighboursIter<'_, D>{}
 
 pub(crate) trait GraphId {
   fn graph_id(&self) -> u32;
 
-  fn var_from_node_id(&self, node: usize) -> Var {
-    Var{ node, graph_id: self.graph_id() }
+  fn var_from_node_id(&self, node: NodeIdx) -> Var {
+    Var { node, graph_id: self.graph_id() }
   }
 }
 
-impl GraphId for Graph {
-  fn graph_id(&self) -> u32 { self.id }
+macro_rules! impl_graphid {
+  ([$($x:tt)*] $($y:tt)*) => {
+    impl <$($x)*> GraphId for $($y)* {
+      fn graph_id(&self) -> u32 { self.id }
+    }
+  };
+
+  ($t:path) => {
+    impl GraphId for $t {
+      fn graph_id(&self) -> u32 { self.id }
+    }
+  };
 }
 
-impl Graph {
-  pub fn new_with_params(params: Parameters) -> Self {
-    static NEXT_ID: AtomicU32 = AtomicU32::new(0);
-    Graph {
-      id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-      nodes: Vec::with_capacity(params.size_hint_vars),
-      sccs: Vec::new(),
-      num_active_nodes: 0,
-      edges_from: Vec::with_capacity(params.size_hint_constrs),
-      edges_to: Vec::with_capacity(params.size_hint_constrs),
-      source_nodes: Vec::new(),
-      parameters: params,
-      state: ModelState::Unsolved,
-    }
-  }
+pub struct Graph<E = CsrEdgeStorage> {
+  id: u32,
+  pub(crate) nodes: Vec<Node>,
+  pub(crate) sccs: Vec<SccInfo>,
+  pub(crate) edges: E,
+  pub(crate) state: ModelState,
+  first_scc_node: usize,
+  // FIXME make sure this is kept up-to-date
+}
 
 
-  pub fn new() -> Self {
-    Self::new_with_params(Parameters::default())
-  }
+pub struct GraphNodesBuilder<E> {
+  _edges: std::marker::PhantomData<E>,
+  id: u32,
+  nodes: Vec<Node>,
+}
 
-  pub(crate) fn reset_nodes(&mut self) {
-    for n in self.nodes.iter_mut() {
-      n.x = n.lb;
-      n.active_pred = None;
-    }
-  }
+impl_graphid!([E] GraphNodesBuilder<E>);
 
-  pub(crate) fn add_node(&mut self, obj: Weight, lb: Weight, ub: Weight, kind: NodeKind) -> usize {
-    let id = self.nodes.len();
-    self.nodes.push(Node { lb, ub, x: lb, obj, active_pred: None, kind });
-    self.edges_to.push(Vec::new());
-    self.edges_from.push(Vec::new());
-    id
-  }
 
-  pub(crate) fn add_var(&mut self, obj: Weight, lb: Weight, ub: Weight) -> Var {
+impl<E: EdgeLookup> GraphNodesBuilder<E> {
+  pub fn add_var(&mut self, obj: Weight, lb: Weight, ub: Weight) -> Var {
     assert!(obj >= 0);
-    let n = self.add_node(obj, lb, ub, NodeKind::Var);
-    self.var_from_node_id(n)
+    let n = Node::new(lb, ub, obj, NodeKind::Var);
+    let v = self.var_from_node_id(self.nodes.len());
+    self.nodes.push(n);
+    v
+  }
+
+  pub fn finish_nodes(self) -> GraphEdgesBuilder<E> {
+    let edges = E::Builder::new(self.nodes.len());
+    GraphEdgesBuilder {
+      id: self.id,
+      nodes: self.nodes,
+      edges,
+    }
+  }
+}
+
+pub struct GraphEdgesBuilder<E: EdgeLookup = CsrEdgeStorage> {
+  id: u32,
+  nodes: Vec<Node>,
+  edges: E::Builder,
+}
+
+impl_graphid!([E: EdgeLookup] GraphEdgesBuilder<E>);
+
+
+impl<E: EdgeLookup> GraphEdgesBuilder<E> {
+  pub fn num_edges_hint(&mut self, num_edges: usize) {
+    self.edges.size_hint(num_edges)
   }
 
   pub fn add_constr(&mut self, lhs: Var, d: Weight, rhs: Var) {
@@ -288,17 +205,106 @@ impl Graph {
       weight: d,
       kind: EdgeKind::Regular,
     };
-    self.add_edge(e);
+    self.edges.add_edge(e);
   }
 
-  pub(crate) fn remove_edge(&mut self, e: Edge) {
-    self.edges_to[e.to].retain(|e| e.from != e.to);
-    self.edges_from[e.from].retain(|e| e.to != e.from);
+  pub fn finish(self) -> Graph<E> {
+    let first_scc_node = self.nodes.len();
+    Graph {
+      id: self.id,
+      nodes: self.nodes,
+      sccs: Vec::new(),
+      first_scc_node,
+      edges: self.edges.finish(),
+      state: Unsolved,
+    }
+  }
+}
+// once it's been finalised, not more adding of edges/nodes.  Only modification allowed is to remove
+// an edge.
+
+
+impl_graphid!([E] Graph<E>);
+
+impl<E: EdgeLookup> Graph<E> {
+  pub fn new() -> GraphNodesBuilder<E> {
+    static NEXT_ID: AtomicU32 = AtomicU32::new(0);
+    GraphNodesBuilder {
+      _edges: std::marker::PhantomData,
+      id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+      nodes: Vec::new(),
+    }
   }
 
-  pub(crate) fn add_edge(&mut self, e: Edge) {
-    self.edges_to[e.to].push(e);
-    self.edges_from[e.from].push(e);
+  pub(crate) fn reset_nodes(&mut self) {
+    for n in self.nodes.iter_mut() {
+      n.x = n.lb;
+      n.active_pred = None;
+    }
+  }
+
+
+  fn update(&mut self) {
+    if let ModelState::Dirty { rebuild_sccs } = &self.state {
+      let should_remove = if *rebuild_sccs {
+        Some(|edge: &Edge| matches!(&edge.kind,
+            EdgeKind::SccIn(_)
+            | EdgeKind::SccOut(_)
+            | EdgeKind::SccToScc { .. }
+        ))
+      } else {
+        None
+      };
+      self.edges.remove_update(should_remove);
+      if *rebuild_sccs {
+        self.nodes.truncate(self.first_scc_node);
+        for n in self.nodes.iter_mut() {
+          debug_assert!(matches!(&n.kind, NodeKind::Var | NodeKind::SccMember(_)));
+          n.kind = NodeKind::Var;
+        }
+      }
+      self.state = Unsolved;
+    }
+  }
+
+
+  pub fn remove_iis(&mut self, iis: &Iis) {
+    self.mark_dirty_batch(iis.edges.iter().copied());
+    self.edges.mark_for_removal_batch(Cow::Borrowed(&iis.edges))
+  }
+
+  pub fn remove_iis_owned(&mut self, iis: Iis) {
+    self.mark_dirty_batch(iis.edges.iter().copied());
+    self.edges.mark_for_removal_batch(Cow::Owned(iis.edges));
+  }
+
+  pub(crate) fn remove_edge(&mut self, from: NodeIdx, to: NodeIdx) {
+    self.mark_dirty(from, to);
+    self.edges.mark_for_removal(from, to);
+  }
+
+  fn mark_dirty_batch(&mut self, edges: impl Iterator<Item=(NodeIdx, NodeIdx)>) {
+    for (from, to) in edges {
+      if self.mark_dirty(from, to) {
+        break;
+      }
+    }
+  }
+
+  fn mark_dirty(&mut self, from: NodeIdx, to: NodeIdx) -> bool {
+    if let ModelState::Dirty { rebuild_sccs } = &self.state {
+      if *rebuild_sccs {
+        return true;
+      }
+    }
+
+    let rebuild_sccs = {
+      let from_node = &self.nodes[from];
+      matches!(&from_node.kind, &NodeKind::SccMember(_)) &&
+        &from_node.kind == &self.nodes[to].kind
+    };
+    self.state = ModelState::Dirty { rebuild_sccs };
+    rebuild_sccs
   }
 
   pub fn solve(&mut self) -> SolveStatus {
@@ -322,7 +328,7 @@ impl Graph {
       ModelState::InfCycle { .. } => SolveStatus::Infeasible(InfKind::Cycle),
       ModelState::InfPath(_) => SolveStatus::Infeasible(InfKind::Path),
       ModelState::Optimal => SolveStatus::Optimal,
-      ModelState::Unsolved | ModelState::Mrs => unreachable!(),
+      ModelState::Unsolved | ModelState::Mrs | ModelState::Dirty { .. } => unreachable!(),
     }
   }
 
@@ -330,53 +336,46 @@ impl Graph {
     Constraint::Edge(self.var_from_node_id(e.from), self.var_from_node_id(e.to))
   }
 
-  pub(crate) fn neighbours<D: EdgeDir>(&self, n: usize) -> NeighboursIter<'_, D> {
-    D::new_neigh_iter(self, n)
-  }
 
-  pub(crate) fn successors(&self, n: usize) -> NeighboursIter<'_, ForwardDir> {
-    ForwardDir::new_neigh_iter(self, n)
-  }
-
-  pub(crate) fn predecessors(&self, n: usize) -> NeighboursIter<'_, BackwardDir> {
-    BackwardDir::new_neigh_iter(self, n)
-  }
-
-  fn forward_label(&mut self) -> Option<ModelState> {
+  fn forward_label<'b>(&'b mut self) -> Option<ModelState> {
     let mut queue = vec![];
     let mut violated_ubs = vec![];
     let mut num_unvisited_pred = vec![0u64; self.nodes.len()];
 
     // Preprocessing - find source nodes and count number of edges
-    for (n, node) in self.nodes.iter().enumerate() {
+    for (i, node) in self.nodes.iter().enumerate() {
       if node.kind.is_scc_member() {
-        continue
+        continue;
       }
-      for e in &self.edges_from[n] {
-        if !self.nodes[e.to].kind.is_scc_member() {
-          num_unvisited_pred[e.to] += 1;
+      self.edges.successors(i).for_each(|e: &Edge| {});
+      for j in self.edges.successor_nodes(i) {
+        if !self.nodes[j].kind.is_scc_member() {
+          num_unvisited_pred[j] += 1;
         }
       }
     }
 
-    for (n, node) in self.nodes.iter_mut().enumerate() {
+    for (i, node) in self.nodes.iter_mut().enumerate() {
       node.active_pred = None;
       node.x = node.lb;
 
       if node.kind.is_scc_member() {
-        continue
+        continue;
       }
-      if num_unvisited_pred[n] == 0 {
-        queue.push(n);
+      if num_unvisited_pred[i] == 0 {
+        queue.push(i);
       }
     }
 
 
     // Solve - traverse DAG in topologically-sorted order
+    // let nodes = &self.nodes;
+
+
     while let Some(i) = queue.pop() {
       let node = &self.nodes[i];
       let x = node.x;
-      for e in &self.edges_from[i] {
+      for e in self.edges.successors(i) {
         let nxt_node = &mut self.nodes[e.to];
         if nxt_node.kind.is_scc_member() {
           continue;
@@ -413,15 +412,6 @@ impl Graph {
       Some(ModelState::Optimal)
     }
   }
-
-  pub(crate) fn find_edge(&self, from: usize, to: usize) -> &Edge {
-    for e in &self.edges_from[from] {
-      if &e.to == &to {
-        return e
-      }
-    }
-    unreachable!("edge does not exist in edges_from")
-  }
 }
 
 #[cfg(test)]
@@ -448,5 +438,4 @@ mod tests {
   //   g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));
   //   status
   // }
-
 }

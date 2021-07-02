@@ -1,3 +1,4 @@
+#![feature(generic_associated_types)]
 mod graph;
 mod mrs;
 mod viz;
@@ -7,6 +8,7 @@ mod model_states;
 
 pub mod test_utils;
 mod scc;
+pub mod edge_storage;
 
 pub use error::*;
 use std::iter::FusedIterator;

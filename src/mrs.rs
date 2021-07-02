@@ -53,8 +53,8 @@ impl MrsTree {
   
   fn build_recursive(&mut self, graph: &Graph, root: usize) {
     let idx_of_root = self.nodes.len() - 1;
-    for e in &graph.edges_from[root] {
-      if matches!(e.kind, EdgeKind::Regular) && graph.nodes[e.to].active_pred == Some(root) {
+    for e in graph.edges.successors(root) {
+      if matches!(&e.kind, &EdgeKind::Regular) && graph.nodes[e.to].active_pred == Some(root) {
         let child = &graph.nodes[e.to];
 
         self.nodes.push(MrsTreeNode {
@@ -105,16 +105,19 @@ impl MrsTree {
 }
 
 /// Compute a spanning tree of active edges for an SCC using Breadth-First Search.
-fn scc_spanning_tree_bfs(edges_from: &Vec<Vec<Edge>>, nodes: &mut [Node], scc: &FnvHashSet<usize>, root: usize) {
+fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &FnvHashSet<usize>, root: usize) {
   let mut queue = std::collections::VecDeque::with_capacity(scc.len());
   queue.push_back(root);
-  while let Some(n) = queue.pop_front() {
-    for e in &edges_from[n] {
+  while let Some(i) = queue.pop_front() {
+    for j in edges.successor_nodes(i) {
       // Adjacent edges that haven't been visited - node is visited if it has an
       // active predecessor or is the root node.
-      if scc.contains(&e.to) && nodes[e.to].active_pred.is_none() && e.to != root {
-        nodes[e.to].active_pred = Some(n);
-        queue.push_back(e.to);
+      if j != root && scc.contains(&j) {
+        match &mut nodes[j].active_pred {
+          ap @ None => *ap = Some(i),
+          Some(_) => {},
+        }
+        queue.push_back(j);
       }
     }
   }
@@ -211,7 +214,7 @@ impl Graph {
     for scc in &self.sccs {
       let (root, root_active_pred) = match self.nodes[scc.scc_node].active_pred {
         // The fake SCC node is not the root
-        Some(p) => match self.find_edge(p, scc.scc_node).kind {
+        Some(p) => match self.edges.find_edge(p, scc.scc_node).kind {
           EdgeKind::SccIn(n) => (n, Some(p)),
           EdgeKind::SccToScc { from: p, to: n } => (n, Some(p)),
           _ => unreachable!()
@@ -220,7 +223,7 @@ impl Graph {
         None => (scc.lb_node, None), // node in the SCC with the max LB
       };
       // Set up the edges *inside* the SCC
-      scc_spanning_tree_bfs(&self.edges_from, &mut self.nodes, &scc.nodes, root);
+      scc_spanning_tree_bfs(&self.edges, &mut self.nodes, &scc.nodes, root);
       self.nodes[root].active_pred = root_active_pred;
     }
 
@@ -232,7 +235,7 @@ impl Graph {
       match (self.nodes[n].active_pred, self.nodes[n].kind) {
         (Some(p), NodeKind::Var) => {
           if matches!(self.nodes[p].kind, NodeKind::Scc(_)) {
-            let scc_member = match self.find_edge(p, n).kind {
+            let scc_member = match self.edges.find_edge(p, n).kind {
               EdgeKind::SccOut(scc_member) => scc_member,
               _ => unreachable!(),
             };

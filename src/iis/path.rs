@@ -126,7 +126,7 @@ impl Graph {
 
       let mut best_val_action = None;
 
-      for e in &self.edges_to[state.node] { // FIXME - need to ignore fake SCC nodes here
+      for e in self.edges.predecessors(state.node) { // FIXME - need to ignore fake SCC nodes here
         let new_state = DpState{ node: e.from, deadline: state.deadline - e.weight };
         let mut val = match self.dp(cache, new_state) {
           Pruned => continue,

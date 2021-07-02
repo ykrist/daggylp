@@ -26,9 +26,9 @@ trait FindCyclicIis<A> {
 }
 
 impl Graph {
-  pub(crate) fn compute_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
+  pub(crate) fn compute_cyclic_iis(&self, minimal: bool, sccs: &[FnvHashSet<usize>]) -> Iis {
     // use shortest_path::ShortestPath;
-    if self.parameters.minimal_cyclic_iis {
+    if minimal {
       <Self as FindCyclicIis<ShortestPathAlg>>::find_cyclic_iis(self, sccs)
     } else {
       <Self as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(self, sccs)

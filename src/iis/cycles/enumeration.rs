@@ -4,6 +4,7 @@ use crate::test_utils::{GraphSpec};
 use crate::viz::{GraphViz, LayoutAlgo};
 use proptest::prelude::{TestCaseError, Strategy};
 use proptest::test_runner::{TestCaseResult, TestError};
+use crate::edge_storage::{ForwardDir, Neighbours};
 
 pub enum Enumeration {}
 
@@ -19,9 +20,8 @@ impl FindCyclicIis<Enumeration> for Graph {
 
 
 #[derive(Copy, Clone, Debug)]
-struct StackVariables<'a> {
-  edges_from_v: &'a [Edge],
-  edge_idx: usize,
+struct StackVariables<I> {
+  edges_from_v: I,
   cycle_found: bool,
   v: usize,
 }
@@ -30,24 +30,26 @@ type BlockList = Vec<FnvHashSet<usize>>;
 
 /// An iterator version of the simple-cycle enumeration algorithm
 /// by Loizou and Thanisch (1982)
-#[derive(Clone)]
-pub struct CycleIter<'a, I> {
+// #[derive(Clone)] // FIXME: add back in?
+pub struct CycleIter<'a, I, E: EdgeLookup> {
   one_cycle_per_scc: bool,
-  local_variables: Vec<StackVariables<'a>>,
+  local_variables: Vec<StackVariables<<E as Neighbours<ForwardDir>>::Neigh<'a>>>,
   marked: Vec<bool>,
   reached: Vec<bool>,
   blocked_pred: BlockList,
   blocked_succ: BlockList,
   current_path_pos: Vec<usize>,
   current_path: Vec<usize>,
-  graph: &'a Graph,
+  graph: &'a Graph<E>,
   sccs: I,
   current_scc: Option<&'a FnvHashSet<usize>>,
   empty: bool,
 }
 
-impl<'a, I> CycleIter<'a, I>
-  where I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+impl<'a, I, E> CycleIter<'a, I, E>
+  where
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
+    E: EdgeLookup,
 {
   fn no_cycle(&mut self, x: usize, y: usize) {
     // println!("block({} -> {}), {:?}", x, y, &self.current_path);
@@ -68,7 +70,7 @@ impl<'a, I> CycleIter<'a, I>
     self.blocked_pred[y].clear();
   }
 
-  pub fn new(graph: &'a Graph, mut sccs: I, one_cycle_per_scc: bool) -> Self {
+  pub fn new(graph: &'a Graph<E>, mut sccs: I, one_cycle_per_scc: bool) -> Self {
     let mut iter = CycleIter {
       one_cycle_per_scc,
       local_variables: Default::default(),
@@ -93,14 +95,15 @@ impl<'a, I> CycleIter<'a, I>
     self.local_variables.clear();
 
     if let Some(scc) = self.current_scc {
-      let root = *scc.iter().max_by_key(|&&n| self.graph.edges_to[n].len()).unwrap();
+      let root = *scc.iter().next().unwrap();
+      // let root = *scc.iter().max_by_key(|&&n| self.graph.edges_to[n].len()).unwrap(); // FIXME is it correct to just take any node?
       self.pre_loop(root);
     }
   }
 
   /// Push to the stack, and do the stuff that happens before the main loop
   fn pre_loop(&mut self, v: usize) {
-    self.local_variables.push(StackVariables { cycle_found: false, v, edges_from_v: &self.graph.edges_from[v], edge_idx: 0 });
+    self.local_variables.push(StackVariables { cycle_found: false, v, edges_from_v: self.graph.edges.successors(v) });
     self.marked[v] = true;
     debug_assert_eq!(self.current_path_pos[v], usize::MAX);
     self.current_path_pos[v] = self.current_path.len();
@@ -114,8 +117,8 @@ impl<'a, I> CycleIter<'a, I>
     let v = self.local_variables[sp].v;
     let scc = self.current_scc.unwrap();
 
-    while let Some(e) = self.local_variables[sp].edges_from_v.get(self.local_variables[sp].edge_idx) {
-      self.local_variables[sp].edge_idx += 1;
+    while let Some(e) = self.local_variables[sp].edges_from_v.next() {
+      // self.local_variables[sp].edge_idx += 1;
       let w = e.to;
       if !scc.contains(&w) || self.blocked_succ[v].contains(&w) {
         continue;
@@ -161,8 +164,10 @@ impl<'a, I> CycleIter<'a, I>
 }
 
 
-impl<'a, I> Iterator for CycleIter<'a, I>
-  where I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+impl<'a, I, E> Iterator for CycleIter<'a, I, E>
+  where
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
+    E: EdgeLookup,
 {
   type Item = Vec<usize>;
 
@@ -184,18 +189,19 @@ impl<'a, I> Iterator for CycleIter<'a, I>
   }
 }
 
-#[derive(Clone)]
-pub struct CyclicIisIter<'a, I> {
+// #[derive(Clone)] // FIXME add back in
+pub struct CyclicIisIter<'a, I, E: EdgeLookup> {
   one_iis_per_scc: bool,
-  cycle_iter: CycleIter<'a, I>,
-  graph: &'a Graph,
+  cycle_iter: CycleIter<'a, I, E>,
+  graph: &'a Graph<E>,
 }
 
-impl<'a, I> CyclicIisIter<'a, I>
+impl<'a, I, E> CyclicIisIter<'a, I, E>
   where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
+    E: EdgeLookup,
 {
-  fn new(graph: &'a Graph, sccs: I, one_iis_per_scc: bool) -> Self
+  fn new(graph: &'a Graph<E>, sccs: I, one_iis_per_scc: bool) -> Self
   {
     CyclicIisIter {
       cycle_iter: CycleIter::new(graph, sccs, false),
@@ -205,9 +211,10 @@ impl<'a, I> CyclicIisIter<'a, I>
   }
 }
 
-impl<'a, I> Iterator for CyclicIisIter<'a, I>
+impl<'a, I, E> Iterator for CyclicIisIter<'a, I, E>
   where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>
+    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
+    E: EdgeLookup,
 {
   type Item = Iis;
 
@@ -237,16 +244,16 @@ impl<'a, I> Iterator for CyclicIisIter<'a, I>
   }
 }
 
-struct CyclesEdgeIter<'a> {
+struct CyclesEdgeIter<'a, E> {
   nodes: std::slice::Iter<'a, usize>,
   len: usize,
   first: usize,
   prev: usize,
-  graph: &'a Graph,
+  graph: &'a Graph<E>,
 }
 
-impl<'a> CyclesEdgeIter<'a> {
-  fn new(graph: &'a Graph, cycle: &'a [usize]) -> Self {
+impl<'a, E: EdgeLookup> CyclesEdgeIter<'a, E> {
+  fn new(graph: &'a Graph<E>, cycle: &'a [usize]) -> Self {
     debug_assert!(cycle.len() > 1);
     let mut nodes = cycle.iter();
     let first = *nodes.next().unwrap();
@@ -261,17 +268,17 @@ impl<'a> CyclesEdgeIter<'a> {
   }
 }
 
-impl Iterator for CyclesEdgeIter<'_> {
+impl<E: EdgeLookup> Iterator for CyclesEdgeIter<'_, E> {
   type Item = Edge;
 
   fn next(&mut self) -> Option<Self::Item> {
     if let Some(&n) = self.nodes.next() {
-      let e = *self.graph.find_edge(self.prev, n);
+      let e = *self.graph.edges.find_edge(self.prev, n);
       self.prev = n;
       self.len -= 1;
       Some(e)
     } else if self.len > 0 {
-      let e = *self.graph.find_edge(self.prev, self.first);
+      let e = *self.graph.edges.find_edge(self.prev, self.first);
       self.len -= 1;
       Some(e)
     } else {
@@ -284,8 +291,8 @@ impl Iterator for CyclesEdgeIter<'_> {
   }
 }
 
-impl Graph {
-  fn cycle_edges<'a>(&'a self, nodes: &'a [usize]) -> CyclesEdgeIter<'a> {
+impl<E: EdgeLookup> Graph<E> {
+  fn cycle_edges<'a>(&'a self, nodes: &'a [usize]) -> CyclesEdgeIter<'a, E> {
     CyclesEdgeIter::new(self, nodes)
   }
 
@@ -299,7 +306,7 @@ impl Graph {
     return None;
   }
 
-  fn iter_cycles<'a, I>(&'a self, sccs: I) -> CycleIter<'a, I::IntoIter>
+  fn iter_cycles<'a, I>(&'a self, sccs: I) -> CycleIter<'a, I::IntoIter, E>
     where
       I: IntoIterator<Item=&'a FnvHashSet<usize>>,
       I::IntoIter: 'a,
@@ -307,7 +314,7 @@ impl Graph {
     CycleIter::new(self, sccs.into_iter(), false)
   }
 
-  fn iter_cyclic_iis<'a, I>(&'a self, sccs: I) -> CyclicIisIter<'a, I::IntoIter>
+  fn iter_cyclic_iis<'a, I>(&'a self, sccs: I) -> CyclicIisIter<'a, I::IntoIter, E>
     where
       I: IntoIterator<Item=&'a FnvHashSet<usize>>,
       I::IntoIter: 'a,

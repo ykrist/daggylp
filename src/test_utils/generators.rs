@@ -46,11 +46,13 @@ impl GraphSpec {
       .map(|data| g.add_var(data.obj, data.lb, data.ub))
       .collect();
 
+    let mut g = g.finish_nodes();
+
     for (&(i, j), &d) in &self.edges {
       g.add_constr(vars[i], d, vars[j]);
     }
 
-    g
+    g.finish()
   }
 
   pub fn add_node(&mut self, data: NodeData) -> usize {

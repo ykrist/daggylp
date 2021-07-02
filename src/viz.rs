@@ -106,7 +106,8 @@ impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   }
 
   fn edges(&'a self) -> Edges<'a, Edge> {
-    let edges = self.graph.edges_from.iter().flat_map(|edges| edges.iter()).copied();
+    let edges = (0..self.graph.nodes.len())
+      .flat_map(|n| self.graph.edges.successors(n)).copied();
     if !self.scc_members {
       edges.filter(|e| !self.graph.nodes[e.to].kind.is_scc_member() && !self.graph.nodes[e.from].kind.is_scc_member() )
         .collect::<Vec<_>>()

@@ -17,7 +17,9 @@ impl Graph {
       => Ok(()),
 
       (ComputeMrs, Unsolved)
+      | (ComputeMrs, Dirty{ .. })
       | (ComputeIis, Unsolved)
+      | (ComputeIis, Dirty{ .. })
       => Err("solve the model first"),
 
       (ComputeMrs, InfCycle { .. })

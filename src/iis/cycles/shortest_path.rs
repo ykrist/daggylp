@@ -1,5 +1,6 @@
 use super::*;
 use crate::iis::Iis;
+use crate::edge_storage::{ForwardDir, BackwardDir, EdgeDir};
 
 pub enum ShortestPathAlg {}
 
@@ -208,7 +209,7 @@ impl FindCyclicIis<ShortestPathAlg> for Graph {
   }
 }
 
-impl Graph {
+impl<E: EdgeLookup> Graph<E> {
   /// Computes the shortest path from `src` to one or more `dests`.
   ///
   /// Type parameter `D` governs whether edges are traverse forwards `D = ForwardDir` or backwards `D = BackwardDir`.
@@ -229,7 +230,9 @@ impl Graph {
     where
       D: EdgeDir,
       I: IntoIterator<Item=usize>,
+      E: crate::edge_storage::Neighbours<D>,
   {
+
     use Label::*;
 
     let mut labels = map_with_capacity(scc.len());
@@ -259,7 +262,7 @@ impl Graph {
         }
       }
 
-      for w in self.neighbours::<D>(v).filter(|w| scc.contains(w)) {
+      for w in EdgeLookup::neighbour_nodes::<D>(&self.edges, v).filter(|w| scc.contains(w)) {
         match labels.get_mut(&w) {
           Some(dest_label @ DestUnvisited { .. }) => {
             *dest_label = Dest { dist_from_src: new_dist_from_src, node: w, pred: v };
@@ -300,7 +303,7 @@ impl Graph {
     };
 
     for &n in scc {
-      for e in &self.edges_from[n] {
+      for e in self.edges.successors(n) {
         if e.weight > 0 && scc.contains(&e.to) {
           let p = self.shortest_path_scc::<ForwardDir, _>(
             scc,
