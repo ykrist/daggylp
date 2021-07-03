@@ -163,11 +163,12 @@ mod tests {
       Ok(())
     }
   }
-  graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
+
+  // graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
 
   graph_tests!{
     Tests;
-    graph_with_solution() => compare_daggylp_with_gurobi [cases=600, layout=LayoutAlgo::Fdp];
+    graph_with_solution() => compare_daggylp_with_gurobi [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
   }
 
 

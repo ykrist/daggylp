@@ -469,11 +469,6 @@ mod tests {
   use proptest::prelude::*;
   use crate::viz::{GraphViz, LayoutAlgo};
 
-  #[test]
-  fn debug() {
-    GraphSpec::new(5, IdenticalNodes{ lb: 0, ub: 1, obj: 0}, Square::new(), AllSame(0))
-      .save_svg_with_layout("scrap.svg", LayoutAlgo::Neato);
-  }
 
   #[test]
   fn tri_sanity_checks() {

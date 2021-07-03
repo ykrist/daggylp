@@ -181,7 +181,7 @@ mod tests {
     fn find_single_path_iis(g: &mut Graph) -> TestCaseResult {
       let status = g.solve();
       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
-      let iis = g.compute_iis();
+      let iis = g.compute_iis(true);
       prop_assert!(iis.len() - 2 < g.nodes.len());
       Ok(())
     }
@@ -190,12 +190,12 @@ mod tests {
       let status = g.solve();
       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
       prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
-      let iis = g.compute_iis();
+      let iis = g.compute_iis(true);
       prop_assert!(iis.edges.len() < g.nodes.len());
 
       let mut edge_sum : Weight = 0;
       for &(i,j) in &iis.edges {
-        edge_sum += g.find_edge(i, j).weight;
+        edge_sum += g.edges.find_edge(i, j).weight;
       }
 
       prop_assert!(iis.bounds.is_some(), "Bounds in IIS");

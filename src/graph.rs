@@ -12,11 +12,11 @@ use std::iter::{ExactSizeIterator, Map};
 use crate::graph::ModelState::Unsolved;
 use std::borrow::Cow;
 use crate::test_utils::NodeData;
-use crate::edge_storage::{CsrEdgeStorage, EdgeDir, EdgeLookupBuilder};
+use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
 pub use crate::edge_storage::{EdgeLookup};
 
 pub type Weight = i64;
-type NodeIdx = usize;
+pub(crate) type NodeIdx = usize;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum InfKind {
@@ -143,7 +143,7 @@ macro_rules! impl_graphid {
   };
 }
 
-pub struct Graph<E = CsrEdgeStorage> {
+pub struct Graph<E = AdjacencyList<Vec<Edge>>> {
   id: u32,
   pub(crate) nodes: Vec<Node>,
   pub(crate) sccs: Vec<SccInfo>,
@@ -182,7 +182,7 @@ impl<E: EdgeLookup> GraphNodesBuilder<E> {
   }
 }
 
-pub struct GraphEdgesBuilder<E: EdgeLookup = CsrEdgeStorage> {
+pub struct GraphEdgesBuilder<E: EdgeLookup> {
   id: u32,
   nodes: Vec<Node>,
   edges: E::Builder,

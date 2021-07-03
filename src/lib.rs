@@ -1,4 +1,6 @@
 #![feature(generic_associated_types)]
+#![feature(option_result_unwrap_unchecked)]
+
 mod graph;
 mod mrs;
 mod viz;

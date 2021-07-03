@@ -272,7 +272,7 @@ impl<'a> GraphTestRunner<'a> {
 
   pub fn run<V, S>(&self, strategy: S, test: V::TestFunction)
     where
-      V: TestInput + Send + 'static, // TODO could remove Send + 'static and let caller determine if they want to run parallel
+      V: TestInput + Send + 'static,
       V::TestFunction: Send + 'static,
       S: SharableStrategy<Value=V>,
   {

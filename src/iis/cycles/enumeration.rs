@@ -351,7 +351,7 @@ mod tests {
     }
 
     pub fn count_cycles_and_iis_cycle_graph(g: &mut Graph) -> TestCaseResult {
-      let n_iis = if g.edges_to.iter().flat_map(|edges| edges.iter()).any(|e| e.weight != 0) {
+      let n_iis = if g.edges.all_edges().any(|e| e.weight != 0) {
         1
       } else {
         0
