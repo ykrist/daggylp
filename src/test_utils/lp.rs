@@ -98,7 +98,7 @@ mod tests {
     graph(any_nodes(3..300), any_edge_weight())
       .prop_map(|g| {
         let s = Lp::build(&g).solve().unwrap();
-        eprintln!("{} nodes, {} edges", g.nodes.len(), g.edges.len());
+        // eprintln!("{} nodes, {} edges", g.nodes.len(), g.edges.len());
         (g, s)
       })
   }
@@ -168,7 +168,7 @@ mod tests {
 
   graph_tests!{
     Tests;
-    graph_with_solution() => compare_daggylp_with_gurobi [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
+    graph_with_solution() => compare_daggylp_with_gurobi(meta) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
   }
 
 

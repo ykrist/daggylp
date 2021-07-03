@@ -220,11 +220,11 @@ impl<'a, I, E> Iterator for CyclicIisIter<'a, I, E>
 
   fn next(&mut self) -> Option<Self::Item> {
     while let Some(cycle) = self.cycle_iter.next() {
-      println!("{:?}", &cycle);
+      // println!("{:?}", &cycle);
       match self.graph.cycle_infeasible(&cycle) {
         None => continue,
         Some(kind) => {
-          println!("inf: {:?}", &cycle);
+          // println!("inf: {:?}", &cycle);
           let mut iis = Iis::from_cycle(self.graph, cycle.iter().copied());
           match kind {
             CyclicInfKind::Pure => {}

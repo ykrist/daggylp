@@ -465,7 +465,7 @@ mod tests {
 
       let iis_size = 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
       g.solve();
-      println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+      // println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       let (sccs, first_inf_scc) = match &g.state {
         ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
         other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
@@ -474,7 +474,7 @@ mod tests {
       prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
       prop_assert_eq!(iis.len(), iis_size);
-      println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+      // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       let no_iis = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
       prop_assert_eq!(no_iis, None);
       let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
@@ -497,7 +497,7 @@ mod tests {
       let t = std::time::Instant::now();
       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
       prop_assert_eq!(iis.len(), 3);
-      println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+      // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
       Ok(())
     }
   }

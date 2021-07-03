@@ -285,10 +285,10 @@ mod tests {
     }
   }
 
-  // graph_test_dbg!(Tests; scc_sizes _);
+  // graph_test_dbg!(Tests; scc_sizes(meta));
 
   graph_tests!{
     Tests;
-    multi_scc_graph() => scc_sizes [layout=LayoutAlgo::Fdp];
+    multi_scc_graph() => scc_sizes(meta) [layout=LayoutAlgo::Fdp];
   }
 }
