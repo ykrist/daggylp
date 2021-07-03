@@ -182,9 +182,19 @@ mod tests {
       let status = g.solve();
       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
       let iis = g.compute_iis(true);
+      let iis_size = iis.len();
       g.remove_iis_owned(iis);
       let status = g.solve();
-      // prop_assert_matches!(status, SolveStatus::Optimal); // FIXME - not true find better test
+      match status {
+        SolveStatus::Infeasible(InfKind::Path) => {
+          let new_iis = g.compute_iis(true);
+          prop_assert!(iis_size <= new_iis.len(), "second IIS should be smaller or the same size")
+        }
+        SolveStatus::Infeasible(InfKind::Cycle) => {
+          test_case_bail!("input graph should be acyclic")
+        }
+        SolveStatus::Optimal => {}
+      }
       Ok(())
     }
 
@@ -217,7 +227,7 @@ mod tests {
     }
   }
 
-  // graph_test_dbg!(Tests; find_path_iis);
+  // graph_test_dbg!(Tests; find_and_remove_iis);
 
   graph_tests!{
     Tests;
