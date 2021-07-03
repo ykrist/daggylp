@@ -308,7 +308,7 @@ impl<E: EdgeLookup> Graph<E> {
   }
 
   pub fn solve(&mut self) -> SolveStatus {
-    // FIXME check state?
+    self.update();
     if let Some(state) = self.forward_label() {
       self.state = state;
     } else {

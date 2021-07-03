@@ -93,16 +93,6 @@ mod tests {
   use crate::graph::*;
   use proptest::prelude::*;
 
-
-  fn graph_with_solution() -> impl SharableStrategy<Value=(GraphSpec, LpSolution)> {
-    graph(any_nodes(3..300), any_edge_weight())
-      .prop_map(|g| {
-        let s = Lp::build(&g).solve().unwrap();
-        // eprintln!("{} nodes, {} edges", g.nodes.len(), g.edges.len());
-        (g, s)
-      })
-  }
-
   // fn graph_without_solution() -> impl SharableStrategy<Value=GraphSpec> {
   //   (3..=4usize)
   //     .prop_flat_map(|size| graph(size, any_nodes(), 0..MAX_EDGE_WEIGHT))
@@ -146,7 +136,9 @@ mod tests {
 
   struct Tests;
   impl Tests {
-    fn compare_daggylp_with_gurobi(g: &mut Graph, s: LpSolution) -> TestCaseResult {
+    fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> TestCaseResult {
+      let mut lp = Lp::build(data);
+      let s = lp.solve().unwrap();
       match (g.solve(), s) {
         (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
           let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| matches!(n.kind, NodeKind::Var)).map(|n| n.x).collect();
@@ -168,7 +160,7 @@ mod tests {
 
   graph_tests!{
     Tests;
-    graph_with_solution() => compare_daggylp_with_gurobi(meta) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
+    graph(any_nodes(3..300), any_edge_weight()) => compare_daggylp_with_gurobi(data) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
   }
 
 

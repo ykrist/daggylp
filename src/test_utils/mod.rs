@@ -172,11 +172,9 @@ pub struct GraphTestRunner<'a> {
 type GraphTestResult = std::result::Result<(), String>;
 
 pub struct SimpleTest {}
-
 pub struct TestWithMeta<M>(std::marker::PhantomData<M>);
-
-pub struct TestWithInput;
-pub struct TestWithInputAndMeta<M>(std::marker::PhantomData<M>);
+pub struct TestWithData;
+pub struct TestWithDataAndMeta<M>(std::marker::PhantomData<M>);
 
 pub trait GraphTestFn: Sized {
   type Meta: Serialize + DeserializeOwned + 'static;
@@ -216,7 +214,7 @@ impl<M: Serialize + DeserializeOwned + Send + 'static> GraphTestFn for TestWithM
   }
 }
 
-impl GraphTestFn for TestWithInput {
+impl GraphTestFn for TestWithData {
   type Meta = ();
   type SValue = GraphSpec;
   type Function = fn(&mut Graph, &GraphSpec) -> TestCaseResult;
@@ -231,7 +229,7 @@ impl GraphTestFn for TestWithInput {
 }
 
 
-impl<M: Serialize + DeserializeOwned + Send + 'static> GraphTestFn for TestWithInputAndMeta<M> {
+impl<M: Serialize + DeserializeOwned + Send + 'static> GraphTestFn for TestWithDataAndMeta<M> {
   type Meta = M;
   type SValue = (GraphSpec, M);
   type Function = fn(&mut Graph, &GraphSpec, M) -> TestCaseResult;
@@ -491,7 +489,7 @@ macro_rules! graph_tests {
   };
 
   (@TT_SPEC data , meta) => {
-    $crate::test_utils::TestWithInputAndMeta<_>
+    $crate::test_utils::TestWithDataAndMeta<_>
   };
 
 

@@ -178,6 +178,16 @@ mod tests {
   struct Tests;
 
   impl Tests {
+    fn find_and_remove_iis(g: &mut Graph) -> TestCaseResult {
+      let status = g.solve();
+      prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
+      let iis = g.compute_iis(true);
+      g.remove_iis_owned(iis);
+      let status = g.solve();
+      // prop_assert_matches!(status, SolveStatus::Optimal); // FIXME - not true find better test
+      Ok(())
+    }
+
     fn find_single_path_iis(g: &mut Graph) -> TestCaseResult {
       let status = g.solve();
       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
@@ -212,6 +222,7 @@ mod tests {
   graph_tests!{
     Tests;
     graph_with_single_path_iis() => find_single_path_iis;
+    graph_with_single_path_iis() => find_and_remove_iis;
     iis_graph() => find_path_iis;
   }
 
