@@ -647,7 +647,7 @@ macro_rules! graph_testcases {
   };
 
   (@INPUT $runner:ident $input:literal $(; $($kw:tt)*)?) => {
-    $(graph_testcases!(@KW $runner : $($kw)*))*
+    $(graph_testcases!(@KW $runner : $($kw)*))*;
     $runner.run($input);
   };
 
