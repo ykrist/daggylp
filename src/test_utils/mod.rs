@@ -7,7 +7,7 @@ pub mod strategy;
 pub(crate) use generators::*;
 
 pub use test_cases::generate_test_cases;
-use crate::viz::{GraphViz, LayoutAlgo};
+use crate::viz::{GraphViz, LayoutAlgo, SccViz, VizConfig};
 use crate::graph::Graph;
 
 use proptest::test_runner::{TestCaseError, TestCaseResult, TestError, FileFailurePersistence, TestRunner as PropTestRunner};
@@ -143,13 +143,13 @@ impl TestManifest {
     Ok(())
   }
 
-  fn write_input_graph(&self, g: &GraphSpec, layout: LayoutAlgo) -> anyhow::Result<()> {
-    g.save_svg_with_layout(self.path.with_file_name(&self.input_graph), layout);
+  fn write_input_graph(&self, g: &GraphSpec, config: VizConfig) -> anyhow::Result<()> {
+    g.viz().configure(config).save_svg(self.path.with_file_name(&self.input_graph));
     Ok(())
   }
 
-  fn write_output_graph(&self, g: &Graph, layout: LayoutAlgo) -> anyhow::Result<()> {
-    g.viz().save_svg_with_layout(self.path.with_file_name(&self.output_graph), layout);
+  fn write_output_graph(&self, g: &Graph, config: VizConfig) -> anyhow::Result<()> {
+    g.viz().configure(config).save_svg(self.path.with_file_name(&self.output_graph));
     Ok(())
   }
 
@@ -168,14 +168,6 @@ impl TestManifest {
   }
 }
 
-pub struct GraphProptestRunner<'a> {
-  id: &'a str,
-  cpus: u32,
-  skip_regressions: bool,
-  deterministic: bool,
-  layout: LayoutAlgo,
-  config: ProptestConfig,
-}
 
 type GraphTestResult = std::result::Result<(), String>;
 
@@ -256,6 +248,15 @@ enum GraphTestMode {
   Debug,
 }
 
+pub struct GraphProptestRunner<'a> {
+  id: &'a str,
+  cpus: u32,
+  skip_regressions: bool,
+  deterministic: bool,
+  pub viz_config: VizConfig,
+  config: ProptestConfig,
+}
+
 impl<'a> GraphProptestRunner<'a> {
   pub fn new_with_layout_prog(id: &'a str, layout: LayoutAlgo) -> Self {
     let mut config = ProptestConfig::with_cases(1000);
@@ -269,7 +270,7 @@ impl<'a> GraphProptestRunner<'a> {
       cpus: 1,
       skip_regressions: false,
       deterministic: false,
-      layout,
+      viz_config: Default::default(),
       config,
     }
   }
@@ -294,12 +295,12 @@ impl<'a> GraphProptestRunner<'a> {
         let (input, meta) = F::split_off_input(input);
         manifest.to_file().unwrap();
         manifest.write_input(&input).unwrap();
-        manifest.write_input_graph(&input, self.layout).unwrap();
+        manifest.write_input_graph(&input, self.viz_config).unwrap();
         manifest.write_meta::<F>(&meta).unwrap();
         let mut graph = input.build();
-        manifest.write_output_graph(&graph, self.layout).unwrap();
+        manifest.write_output_graph(&graph, self.viz_config).unwrap();
         F::run_test(test, &mut graph, &input, meta).ok();
-        manifest.write_output_graph(&graph, self.layout).unwrap();
+        manifest.write_output_graph(&graph, self.viz_config).unwrap();
         eprintln!("{}", reason.message());
         panic!("test case failure");
       }
@@ -392,14 +393,14 @@ impl<'a> GraphProptestRunner<'a> {
     assert!(cpus > 0);
     self.cpus = cpus;
   }
-  pub fn layout(&mut self, l: LayoutAlgo) {
-    self.layout = l;
-  }
 
   pub fn cases(&mut self, n: u32) {
     self.config.cases = n;
   }
 
+  pub fn viz_config(&mut self) -> &mut VizConfig {
+    &mut self.viz_config
+  }
 
   fn find_regressions(&self) -> anyhow::Result<Vec<TestManifest>> {
     let search_path = test_regressions_dir().join(self.id);
@@ -441,8 +442,8 @@ impl<'a> GraphProptestRunner<'a> {
         unreachable!()
       }
       Err(TestCaseError::Fail(reason)) => {
-        manifest.write_input_graph(&input, self.layout);
-        manifest.write_output_graph(&graph, self.layout);
+        manifest.write_input_graph(&input, self.viz_config);
+        manifest.write_output_graph(&graph, self.viz_config);
         panic!("test case failure: {}", reason.message());
       }
       Ok(()) => {}
@@ -541,7 +542,7 @@ impl<E: Into<anyhow::Error>> From<E> for ErrorWithGraphContext {
 
 pub struct GraphTestcaseRunner<'a, T: TestcaseTest> {
   id: &'a str,
-  layout: LayoutAlgo,
+  pub viz_config: VizConfig,
   test: T::Function
 }
 
@@ -550,7 +551,7 @@ impl<'a, T: TestcaseTest> GraphTestcaseRunner<'a, T> {
   pub fn new_with_layout_prog(id: &'a str, test: T::Function, layout: LayoutAlgo) -> Self {
     GraphTestcaseRunner {
       id,
-      layout,
+      viz_config: Default::default(),
       test,
     }
   }
@@ -567,16 +568,20 @@ impl<'a, T: TestcaseTest> GraphTestcaseRunner<'a, T> {
     let result = T::run(self.test, &mut graph, &data, meta);
     if let Err(ErrorWithGraphContext{ error, iis }) = result {
       let mut path = test_testcase_failures_dir().join(format!("{}.input.svg", self.id));
-      data.save_svg_with_layout(&path, self.layout);
+      data.viz().configure(self.viz_config).save_svg(&path);
       path.set_file_name(format!("{}.output.svg", self.id));
-      let mut gv = graph.viz();
+      let mut gv = graph.viz().configure(self.viz_config);
       if let Some(iis) = iis.as_ref() {
         gv = gv.iis(iis);
       }
-      gv.save_svg_with_layout(path, self.layout);
+      gv.save_svg(path);
       eprintln!("test case failure (input {}):\n{:?}", input_basename, error);
       panic!("test failed");
     }
+  }
+
+  pub fn viz_config(&mut self) -> &mut VizConfig {
+    &mut self.viz_config
   }
 }
 
@@ -604,7 +609,7 @@ macro_rules! graph_testcase_assert {
   ($cond:expr, $($arg:tt)+) => {{
     let cond = $cond;
     if !cond {
-      return Err(anyhow::anyhow!($($arg)*))
+      return Err($crate::test_utils::ErrorWithGraphContext::from(anyhow::anyhow!($($arg)*)))
     }
   }};
 }
@@ -625,28 +630,48 @@ macro_rules! graph_testcase_assert_ne {
 
 #[macro_export]
 macro_rules! graph_testcases {
-  ($m:path; $test_function:ident$(($($test_type_spec:tt)*))? $([$($input:tt)*])+ ) => {
-    // $(
+  ($m:path; $(
+    $test_function:ident$(($($test_type_spec:tt)*))? $([$($input:tt)*])+
+  )+) => {
+    $(
       #[test]
       fn $test_function() {
         let mut runner = GraphTestcaseRunner::<'_, graph_proptests!(@TT_SPEC $($($test_type_spec)*)*)>::new(stringify!($test_function), <$m>::$test_function);
+
         $(
-          runner.run(graph_testcases!(@INPUT $($input)*));
+          graph_testcases!(@INPUT runner $($input)*);
         )*
+
       }
-    // )*
+    )*
   };
 
-  (@INPUT $input:literal) => {
-    $input
+  (@INPUT $runner:ident $input:literal $(; $($kw:tt)*)?) => {
+    $(graph_testcases!(@KW $runner : $($kw)*))*
+    $runner.run($input);
   };
 
-  (@INPUT $input:literal, $meta:expr) => {
-    ($input, $meta)
+  (@INPUT $runner:ident $input:literal, $meta:expr $(; $($kw:tt)*)?) => {
+    stringify!($(graph_testcases!(@KW $runner : $($kw)*))*);
+    $(graph_testcases!(@KW $runner : $($kw)*))*;
+    $runner.run(($input, $meta));
   };
 
   (@KW $runner:ident : ) => {};
 
+  (@KW $runner:ident : layout = $layout:expr $( , $($tail:tt)* )? ) => {
+    $runner.viz_config().layout($layout);
+    $(
+      graph_testcases!(@KW $runner : $($tail)*);
+    )*
+  };
+
+  (@KW $runner:ident : sccs = $scc:expr $( , $($tail:tt)* )? ) => {
+    $runner.viz_config().sccs($scc);
+    $(
+      graph_testcases!(@KW $runner : $($tail)*);
+    )*
+  };
 }
 
 
@@ -686,7 +711,14 @@ macro_rules! graph_proptests {
   (@KW $runner:ident : ) => {};
 
   (@KW $runner:ident : layout = $layout:expr $( , $($tail:tt)* )? ) => {
-    $runner.layout($layout);
+    $runner.viz_config.layout($layout);
+    $(
+      graph_proptests!(@KW $runner : $($tail)*);
+    )*
+  };
+
+  (@KW $runner:ident : sccs = $scc:expr $( , $($tail:tt)* )? ) => {
+    $runner.viz_config().sccs($scc);
     $(
       graph_proptests!(@KW $runner : $($tail)*);
     )*

@@ -416,6 +416,8 @@ impl<E: EdgeLookup> Graph<E> {
 
 #[cfg(test)]
 mod tests {
+  #[macro_use]
+  use crate::*;
   use super::*;
   use crate::test_utils::*;
   use crate::viz::*;
@@ -423,21 +425,26 @@ mod tests {
   use SolveStatus::*;
   use InfKind::*;
 
+  struct Tests;
+  impl Tests {
+    fn solve_feasible(g: &mut Graph, solution: Vec<Weight>) -> GraphTestcaseResult {
+      if matches!(g.solve(), SolveStatus::Infeasible(_)) {
+        Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
+      }
+      g.compute_mrs();
+      let x : Vec<_> = g.nodes[..g.first_scc_node].iter().map(|n| n.x).collect();
+      graph_testcase_assert_eq!(solution, x);
+      Ok(())
+    }
+  }
 
+  graph_testcases!{ Tests;
+    solve_feasible(meta)
+    ["k4.f", vec![0; 4]; layout=LayoutAlgo::Fdp]
+    ["k8.f", vec![0; 8]; layout=LayoutAlgo::Fdp]
+    ["simple.f", vec![0, 2, 4]; layout=LayoutAlgo::Fdp]
+    ["simple-cycle.f", vec![1, 1, 1, 1, 0, 2]; sccs=SccViz::Hide]
+    ["multiple-sccs.f", vec![0, 0, 7, 2, 2, 2, 2, 6, 6, 6]]
+  }
 
-  // #[test_case("simple-f" => Optimal)]
-  // #[test_case("simple-cycle-cei" => Infeasible(Cycle))]
-  // #[test_case("simple-cycle-f" => Optimal)]
-  // #[test_case("complex-scc-cei" => Infeasible(Cycle))]
-  // #[test_case("multiple-sccs-f" => Optimal)]
-  // #[test_case("k8-f" => Optimal)]
-  // #[test_case("k8-cei" => Infeasible(Cycle))]
-  // #[test_case("k8-cbi" => Infeasible(Cycle))]
-  // fn solve(input_name: &str) -> SolveStatus {
-  //   let mut g = GraphSpec::load_from_file(test_input(input_name)).unwrap().build();
-  //   let status = g.solve();
-  //   // if draw {
-  //   g.viz().save_svg(test_output(&format!("solve-{}.svg", input_name)));
-  //   status
-  // }
 }
