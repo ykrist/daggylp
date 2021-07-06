@@ -353,8 +353,8 @@ impl<'a> GraphViz<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
   }
 }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
   // use super::*;
   // use crate::test_utils::*;
   //
@@ -369,4 +369,4 @@ mod tests {
   //   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
   //   g.save_svg(test_output("test.generator.svg"));
   // }
-}
+// }

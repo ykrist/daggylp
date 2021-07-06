@@ -462,60 +462,60 @@ impl NodeSpec for IdenticalNodes {
   fn ub(&mut self, _: usize) -> Option<Weight> { Some(self.ub) }
   fn obj(&mut self, _: usize) -> Option<Weight> { Some(self.obj) }
 }
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use proptest::prelude::*;
-  use crate::viz::{GraphViz, LayoutAlgo};
-
-
-  #[test]
-  fn tri_sanity_checks() {
-    assert_eq!(Triangular::strongly_connected(3), true);
-    assert_eq!(Triangular::strongly_connected(4), false);
-    assert_eq!(Triangular::strongly_connected(6), true);
-    assert_eq!(Triangular::strongly_connected(7), false);
-    assert_eq!(inverse_triangular_number(0), 0);
-    assert_eq!(triangular_number(0), 0);
-  }
-
-  #[test]
-  fn sq_sanity_checks() {
-    assert_eq!(Square::strongly_connected(1), false);
-    assert_eq!(Square::strongly_connected(2), false);
-    assert_eq!(Square::strongly_connected(3), false);
-
-    // 0 1
-    // 2 3
-    assert_eq!(Square::strongly_connected(4), true);
-
-    // 0 1 2
-    // 3 4
-    assert_eq!(Square::strongly_connected(5), false);
-
-    // 0 1 2
-    // 3 4 6
-    assert_eq!(Square::strongly_connected(6), true);
-
-    // 0 1 2
-    // 3 4 5
-    // 6
-    assert_eq!(Square::strongly_connected(7), false);
-
-    // 0  1  2  3
-    // 4  5  6  7
-    // 8  9  10 11
-    // 12 13 14
-    assert_eq!(Square::strongly_connected(15), true);
-  }
-
-  proptest! {
-    #[test]
-    fn inverse_triangular_is_actually_an_inverse(n in 0..1000_000usize) {
-      let t = triangular_number(n);
-      let m = inverse_triangular_number(t);
-      prop_assert_eq!(m, n);
-    }
-  }
-}
+//
+// #[cfg(test)]
+// mod tests {
+//   use super::*;
+//   use proptest::prelude::*;
+//   use crate::viz::{GraphViz, LayoutAlgo};
+//
+//
+//   #[test]
+//   fn tri_sanity_checks() {
+//     assert_eq!(Triangular::strongly_connected(3), true);
+//     assert_eq!(Triangular::strongly_connected(4), false);
+//     assert_eq!(Triangular::strongly_connected(6), true);
+//     assert_eq!(Triangular::strongly_connected(7), false);
+//     assert_eq!(inverse_triangular_number(0), 0);
+//     assert_eq!(triangular_number(0), 0);
+//   }
+//
+//   #[test]
+//   fn sq_sanity_checks() {
+//     assert_eq!(Square::strongly_connected(1), false);
+//     assert_eq!(Square::strongly_connected(2), false);
+//     assert_eq!(Square::strongly_connected(3), false);
+//
+//     // 0 1
+//     // 2 3
+//     assert_eq!(Square::strongly_connected(4), true);
+//
+//     // 0 1 2
+//     // 3 4
+//     assert_eq!(Square::strongly_connected(5), false);
+//
+//     // 0 1 2
+//     // 3 4 6
+//     assert_eq!(Square::strongly_connected(6), true);
+//
+//     // 0 1 2
+//     // 3 4 5
+//     // 6
+//     assert_eq!(Square::strongly_connected(7), false);
+//
+//     // 0  1  2  3
+//     // 4  5  6  7
+//     // 8  9  10 11
+//     // 12 13 14
+//     assert_eq!(Square::strongly_connected(15), true);
+//   }
+//
+//   proptest! {
+//     #[test]
+//     fn inverse_triangular_is_actually_an_inverse(n in 0..1000_000usize) {
+//       let t = triangular_number(n);
+//       let m = inverse_triangular_number(t);
+//       prop_assert_eq!(m, n);
+//     }
+//   }
+// }

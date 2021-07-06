@@ -1,6 +1,6 @@
 #![feature(generic_associated_types)]
 #![feature(option_result_unwrap_unchecked)]
-
+#![allow(warnings)]
 mod graph;
 mod mrs;
 mod viz;
@@ -61,6 +61,23 @@ impl<T: Copy, const N: usize> Iterator for ArrayIntoIter<T, N> {
 
 impl<T: Copy, const N: usize> ExactSizeIterator for ArrayIntoIter<T, N> {}
 impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
+
+#[cfg(test)]
+mod egg {
+  use daggylp_macros::*;
+
+  #[graph_test]
+  #[input("input_name.f", sccs="show", layout="neato")]
+  fn foo() {
+    println!("hello world");
+  }
+
+  #[graph_proptest(debug, sccs="show", layout="neato")]
+  #[strategy(hello_world(34 + 5))]
+  fn bar() {
+
+  }
+}
 
 // #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 // struct UsizeNiche<const N: usize>(usize);

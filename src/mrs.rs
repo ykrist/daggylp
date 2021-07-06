@@ -252,89 +252,89 @@ impl Graph {
   }
 }
 
-
-#[cfg(test)]
-mod tests {
-  #[macro_use]
-  use crate::*;
-  use super::*;
-  use crate::test_utils::{*, strategy::*};
-  use crate::viz::*;
-  use test_case::test_case;
-  use SolveStatus::*;
-  use InfKind::*;
-  use proptest::prelude::*;
-  use proptest::test_runner::TestCaseResult;
-  use crate::graph::SolveStatus;
-
-
-  struct Tests;
-  impl Tests {
-    fn trivial_objective_gives_empty_mrs(g: &mut Graph) -> TestCaseResult {
-      let status = g.solve();
-      prop_assert_matches!(status, SolveStatus::Optimal);
-      prop_assert_eq!(g.compute_mrs().len(), 0);
-      Ok(())
-    }
-
-    fn mrs_are_disjoint(g: &mut Graph) -> TestCaseResult {
-      let status = g.solve();
-      prop_assert_matches!(status, SolveStatus::Optimal);
-
-      let mut seen_vars = FnvHashSet::default();
-      let mut seen_cons = FnvHashSet::default();
-      let mrs = g.compute_mrs();
-      prop_assert!(mrs.len() > 0, "MRS should not be empty");
-      println!("{:?}", mrs);
-      for mrs in mrs {
-        for v in mrs.vars() {
-          let unseen = seen_vars.insert(v);
-          prop_assert!(unseen, "MRS is not disjoint, seen_vars = {:?}", &seen_vars);
-        }
-        for c in mrs.constrs() {
-          let unseen = seen_cons.insert(c);
-          prop_assert!(unseen, "MRS is not disjoint, seen_cons = {:?}", &seen_cons);
-        }
-      }
-      Ok(())
-    }
-
-
-    fn mrs_forest(g: &mut Graph) -> GraphTestcaseResult {
-      if matches!(g.solve(), SolveStatus::Infeasible(_)) {
-        Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
-      }
-      let mut mrs = g.compute_mrs();
-      graph_testcase_assert_eq!(mrs.len(), 1);
-      let mrs = mrs.pop().unwrap();
-      println!("{:?}", &mrs);
-      Ok(())
-    }
-  }
-  //
-  // graph_proptest_dbg!{ Tests;
-  //   mrs_are_disjoint
-  //
-  // }
-
-
-  graph_testcases!{ Tests;
-    mrs_forest
-    // ["k4.f", vec![0; 4]; layout=LayoutAlgo::Fdp]
-    // ["k8.f", vec![0; 8]; layout=LayoutAlgo::Fdp]
-    // ["simple.f", vec![0, 2, 4]; layout=LayoutAlgo::Fdp]
-    // ["simple-cycle.f", vec![1, 1, 1, 1, 0, 2]; sccs=SccViz::Hide]
-    ["multiple-sccs.f"; sccs=SccViz::Hide]
-  }
-
-  graph_proptests!{ Tests;
-    acyclic_graph(
-      prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), Just(0)), 1..100),
-      0..(10 as Weight)
-    ) => trivial_objective_gives_empty_mrs;
-    acyclic_graph(
-      prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
-      0..(10 as Weight)
-    ) => mrs_are_disjoint;
-  }
-}
+//
+// #[cfg(test)]
+// mod tests {
+//   #[macro_use]
+//   use crate::*;
+//   use super::*;
+//   use crate::test_utils::{*, strategy::*};
+//   use crate::viz::*;
+//   use test_case::test_case;
+//   use SolveStatus::*;
+//   use InfKind::*;
+//   use proptest::prelude::*;
+//   use proptest::test_runner::TestCaseResult;
+//   use crate::graph::SolveStatus;
+//
+//
+//   struct Tests;
+//   impl Tests {
+//     fn trivial_objective_gives_empty_mrs(g: &mut Graph) -> TestCaseResult {
+//       let status = g.solve();
+//       prop_assert_matches!(status, SolveStatus::Optimal);
+//       prop_assert_eq!(g.compute_mrs().len(), 0);
+//       Ok(())
+//     }
+//
+//     fn mrs_are_disjoint(g: &mut Graph) -> TestCaseResult {
+//       let status = g.solve();
+//       prop_assert_matches!(status, SolveStatus::Optimal);
+//
+//       let mut seen_vars = FnvHashSet::default();
+//       let mut seen_cons = FnvHashSet::default();
+//       let mrs = g.compute_mrs();
+//       prop_assert!(mrs.len() > 0, "MRS should not be empty");
+//       println!("{:?}", mrs);
+//       for mrs in mrs {
+//         for v in mrs.vars() {
+//           let unseen = seen_vars.insert(v);
+//           prop_assert!(unseen, "MRS is not disjoint, seen_vars = {:?}", &seen_vars);
+//         }
+//         for c in mrs.constrs() {
+//           let unseen = seen_cons.insert(c);
+//           prop_assert!(unseen, "MRS is not disjoint, seen_cons = {:?}", &seen_cons);
+//         }
+//       }
+//       Ok(())
+//     }
+//
+//
+//     fn mrs_forest(g: &mut Graph) -> GraphTestcaseResult {
+//       if matches!(g.solve(), SolveStatus::Infeasible(_)) {
+//         Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
+//       }
+//       let mut mrs = g.compute_mrs();
+//       graph_testcase_assert_eq!(mrs.len(), 1);
+//       let mrs = mrs.pop().unwrap();
+//       println!("{:?}", &mrs);
+//       Ok(())
+//     }
+//   }
+//   //
+//   // graph_proptest_dbg!{ Tests;
+//   //   mrs_are_disjoint
+//   //
+//   // }
+//
+//
+//   graph_testcases!{ Tests;
+//     mrs_forest
+//     // ["k4.f", vec![0; 4]; layout=LayoutAlgo::Fdp]
+//     // ["k8.f", vec![0; 8]; layout=LayoutAlgo::Fdp]
+//     // ["simple.f", vec![0, 2, 4]; layout=LayoutAlgo::Fdp]
+//     // ["simple-cycle.f", vec![1, 1, 1, 1, 0, 2]; sccs=SccViz::Hide]
+//     ["multiple-sccs.f"; sccs=SccViz::Hide]
+//   }
+//
+//   graph_proptests!{ Tests;
+//     acyclic_graph(
+//       prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), Just(0)), 1..100),
+//       0..(10 as Weight)
+//     ) => trivial_objective_gives_empty_mrs;
+//     acyclic_graph(
+//       prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
+//       0..(10 as Weight)
+//     ) => mrs_are_disjoint;
+//   }
+// }

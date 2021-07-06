@@ -82,16 +82,16 @@ enum LpSolution {
 }
 
 
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  #[macro_use]
-  use crate::*;
-  use crate::test_utils::*;
-  use crate::test_utils::strategy::*;
-  use crate::graph::*;
-  use proptest::prelude::*;
+//
+// #[cfg(test)]
+// mod tests {
+//   use super::*;
+//   #[macro_use]
+//   use crate::*;
+//   use crate::test_utils::*;
+//   use crate::test_utils::strategy::*;
+//   use crate::graph::*;
+//   use proptest::prelude::*;
 
   // fn graph_without_solution() -> impl SharableStrategy<Value=GraphSpec> {
   //   (3..=4usize)
@@ -134,34 +134,34 @@ mod tests {
   //   }
   // }
 
-  struct Tests;
-  impl Tests {
-    fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> TestCaseResult {
-      let mut lp = Lp::build(data);
-      let s = lp.solve().unwrap();
-      match (g.solve(), s) {
-        (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
-          let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| matches!(n.kind, NodeKind::Var)).map(|n| n.x).collect();
-          prop_assert_eq!(graph_soln, solution);
-        },
-        (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {
-
-        }
-        (g_status, lp_status) => {
-          test_case_bail!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status)
-        }
-      }
-
-      Ok(())
-    }
-  }
-
-  // graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
-
-  graph_proptests!{
-    Tests;
-    graph(any_nodes(3..300), any_edge_weight()) => compare_daggylp_with_gurobi(data) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
-  }
-
-
-}
+//   struct Tests;
+//   impl Tests {
+//     fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> TestCaseResult {
+//       let mut lp = Lp::build(data);
+//       let s = lp.solve().unwrap();
+//       match (g.solve(), s) {
+//         (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
+//           let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| matches!(n.kind, NodeKind::Var)).map(|n| n.x).collect();
+//           prop_assert_eq!(graph_soln, solution);
+//         },
+//         (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {
+//
+//         }
+//         (g_status, lp_status) => {
+//           test_case_bail!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status)
+//         }
+//       }
+//
+//       Ok(())
+//     }
+//   }
+//
+//   // graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
+//
+//   graph_proptests!{
+//     Tests;
+//     graph(any_nodes(3..300), any_edge_weight()) => compare_daggylp_with_gurobi(data) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
+//   }
+//
+//
+// }
