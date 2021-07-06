@@ -2,12 +2,14 @@ use dot::*;
 use super::graph::*;
 use std::path::Path;
 use crate::test_utils::{GraphSpec};
+use crate::iis::Iis;
 
 
 impl Graph {
-  pub (crate) fn viz(&self) -> VizGraph<'_> {
+  pub(crate) fn viz(&self) -> VizGraph<'_> {
     VizGraph {
       graph: self,
+      iis: None,
       var_names: None,
       scc_members: true,
       edge_weights: true,
@@ -18,6 +20,7 @@ impl Graph {
 #[derive(Copy, Clone)]
 pub(crate) struct VizGraph<'a> {
   graph: &'a Graph,
+  iis: Option<&'a Iis>,
   var_names: Option<&'a dyn Fn(Var) -> String>,
   scc_members: bool,
   edge_weights: bool,
@@ -41,7 +44,7 @@ impl LayoutAlgo {
   }
 }
 
-pub(crate) trait GraphViz<'a, N, E> : GraphWalk<'a, N, E>  + Labeller<'a, N, E> + Sized
+pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + Sized
   where
     N: Clone + 'a,
     E: Clone + 'a,
@@ -77,6 +80,11 @@ pub(crate) trait GraphViz<'a, N, E> : GraphWalk<'a, N, E>  + Labeller<'a, N, E> 
 }
 
 impl<'a> VizGraph<'a> {
+  pub fn iis(mut self, iis: &'a Iis) -> Self {
+    self.iis = Some(iis);
+    self
+  }
+
   pub(crate) fn hide_scc_members(mut self) -> Self {
     self.scc_members = false;
     self
@@ -97,7 +105,7 @@ impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   fn nodes(&'a self) -> Nodes<'a, usize> {
     if !self.scc_members {
       self.graph.nodes.iter().enumerate()
-        .filter_map(|(n, node)| if node.kind.is_scc_member() { None } else { Some(n) } )
+        .filter_map(|(n, node)| if node.kind.is_scc_member() { None } else { Some(n) })
         .collect::<Vec<_>>()
         .into()
     } else {
@@ -109,7 +117,7 @@ impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
     let edges = (0..self.graph.nodes.len())
       .flat_map(|n| self.graph.edges.successors(n)).copied();
     if !self.scc_members {
-      edges.filter(|e| !self.graph.nodes[e.to].kind.is_scc_member() && !self.graph.nodes[e.from].kind.is_scc_member() )
+      edges.filter(|e| !self.graph.nodes[e.to].kind.is_scc_member() && !self.graph.nodes[e.from].kind.is_scc_member())
         .collect::<Vec<_>>()
         .into()
     } else {
@@ -130,51 +138,101 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
   fn graph_id(&'a self) -> Id<'a> { Id::new("debug").unwrap() }
 
   fn node_id(&'a self, n: &usize) -> Id<'a> { Id::new(format!("n{}", n)).unwrap() }
+  //
+  // fn node_color(&self, n: &usize) -> Option<LabelText> {
+  //
+  //   Some(LabelText::escaped(color))
+  // }
 
   fn node_label(&'a self, n: &usize) -> LabelText {
     let node = &self.graph.nodes[*n];
-    let name = if let Some(f) = self.var_names {
-      f(self.graph.var_from_node_id(*n))
-    } else {
-      match node.kind {
-        NodeKind::Var => format!("X[{}]", n),
-        NodeKind::Scc(k) => format!("SCC[{}]", k),
-        NodeKind::SccMember(k) => format!("X[{}|{}]", n, k),
+
+    let name = match node.kind {
+      NodeKind::Scc(k) => format!("SCC[{}]", k),
+      _ => if let Some(f) = self.var_names {
+        f(self.graph.var_from_node_id(*n))
+      } else {
+        format!("X[{}]", n)
       }
     };
-    let var = match &self.graph.state {
-      ModelState::Optimal | ModelState::Mrs => format!("{} = {}", &name, node.x),
-      _ => name
+
+    let border_color = self.iis.map(|iis| iis.bounds.as_ref())
+      .flatten()
+      .filter(|(ub, lb)| n == ub || n == lb)
+      .map(|_| "red")
+      .unwrap_or("black");
+
+    let bg_color = match &self.graph.nodes[*n].kind {
+      &NodeKind::SccMember(k) => format!("/pastel19/{}", (k % 8) + 1),
+      NodeKind::Scc(_) => "/pastel28/8".to_string(),
+      NodeKind::Var => "/pastel19/9".to_string(),
     };
 
-    LabelText::escaped(format!("{}\n[{},{}]", var, node.lb, node.ub))
+    let scc_member_row = if let NodeKind::SccMember(k) = node.kind {
+      format!(r#"<TR><TD COLSPAN="3">SCC[{}]</TD></TR>"#, k)
+    } else {
+      "".to_string()
+    };
+
+
+    let html = format!(
+      concat!(
+      r#"<FONT FACE="fantasque sans mono">"#,
+      r#"<TABLE BORDER="0" CELLSPACING="0" CELLBORDER="1" BGCOLOR="{}" COLOR="{}">"#,
+      r#"<TR><TD COLSPAN="3">{}</TD></TR>"#,
+      "{}",
+      r#"<TR><TD>{}</TD><TD>{}</TD><TD>{}</TD></TR>"#,
+      r#"</TABLE>"#,
+      r#"</FONT>"#
+      ),
+      bg_color, border_color, name,
+      scc_member_row,
+      node.lb, node.x, node.ub,
+    );
+    LabelText::html(html)
   }
 
   fn edge_color(&'a self, e: &Edge) -> Option<LabelText<'a>> {
-    let c = match self.graph.nodes[e.to].active_pred {
-      Some(pred) if pred == e.from => "red",
-      _ => "black",
+    let is_iis = self.iis
+      .map(|iis| iis.edges.contains(&(e.from, e.to)))
+      .unwrap_or(false);
+
+    let c = if is_iis {
+      "orangered"
+    } else {
+      match self.graph.nodes[e.to].active_pred {
+        Some(pred) if pred == e.from => "lightseagreen",
+        _ => "grey",
+      }
     };
     Some(LabelText::escaped(c))
   }
 
-  fn edge_label(&self, e: &Edge) -> LabelText {
-    LabelText::escaped(format!("{}", e.weight))
+  fn edge_start_arrow(&self, e: &Edge) -> Arrow {
+    match self.graph.nodes[e.to].active_pred {
+      Some(pred) if pred == e.from => Arrow::from_arrow(ArrowShape::Dot(dot::Fill::Filled)),
+      _ => Arrow::default(),
+    }
   }
 
-  fn node_shape(&self, n: &usize) -> Option<LabelText> {
-    let shp = match &self.graph.nodes[*n].kind {
-      NodeKind::Var => "circle",
-      NodeKind::SccMember(_) => "doublecircle",
-      NodeKind::Scc(_) => "square"
+  fn edge_label(&self, e: &Edge) -> LabelText {
+    let s = match e.kind {
+      EdgeKind::SccToScc { .. } => "scc2scc=",
+      EdgeKind::Regular => "",
+      EdgeKind::SccOut(_) => "scc-out=",
+      EdgeKind::SccIn(_) => "scc-in=",
     };
-    Some(LabelText::escaped(shp))
+    LabelText::html(format!(r#"<FONT FACE="fantasque sans mono">{}{}</FONT>"#, s, e.weight))
+  }
+
+  fn node_shape(&self, _: &usize) -> Option<LabelText> {
+    Some(LabelText::escaped("plaintext"))
   }
 }
 
 impl<'a> GraphViz<'a, usize, Edge> for VizGraph<'a> {}
 
-impl<'a> GraphWalk<'a,  usize, (usize, usize)> for GraphSpec {
+impl<'a> GraphWalk<'a, usize, (usize, usize)> for GraphSpec {
   fn nodes(&'a self) -> Nodes<'a, usize> {
     (0..self.nodes.len()).collect::<Vec<_>>().into()
   }

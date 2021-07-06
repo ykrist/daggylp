@@ -287,7 +287,7 @@ mod tests {
 
   // graph_test_dbg!(Tests; scc_sizes(meta));
 
-  graph_tests!{
+  graph_proptests!{
     Tests;
     multi_scc_graph() => scc_sizes(meta) [layout=LayoutAlgo::Fdp];
   }

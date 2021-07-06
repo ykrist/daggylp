@@ -158,7 +158,7 @@ mod tests {
 
   // graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
 
-  graph_tests!{
+  graph_proptests!{
     Tests;
     graph(any_nodes(3..300), any_edge_weight()) => compare_daggylp_with_gurobi(data) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
   }

@@ -6,7 +6,7 @@ use fnv::FnvHashMap;
 fn update_min<T: Ord, U>(dst: &mut Option<(T, U)>, src: (T, U)) -> bool {
   if let Some(v) = dst {
     if &v.0 <= &src.0 {
-      return false
+      return false;
     }
   }
   *dst = Some(src);
@@ -18,7 +18,6 @@ struct DpState {
   node: usize,
   deadline: Weight,
 }
-
 
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -82,22 +81,29 @@ impl Iterator for DpShortestPath<'_> {
 
 impl Graph {
   pub(crate) fn compute_path_iis(&self, violated_ubs: &[usize]) -> Iis {
-    let mut cache  = map_with_capacity(64);
-
+    let mut cache = map_with_capacity(64);
     let mut shortest_path_initial_state = None;
 
-    for &node in violated_ubs {
-      let initial_state = DpState{ node, deadline: self.nodes[node].ub };
+    for &n in violated_ubs {
+      let node = &self.nodes[n];
+      debug_assert!(!matches!(&node.kind, NodeKind::SccMember(_)));
+      let (n, node) = if let &NodeKind::Scc(k) = &node.kind {
+        let n = self.sccs[k].ub_node;
+        (n, &self.nodes[n])
+      } else {
+        (n, node)
+      };
+      let initial_state = DpState { node: n, deadline: node.ub };
       match self.dp(&mut cache, initial_state) {
         Pruned => continue,
         Terminate(l) => {
           debug_assert_eq!(l, 0);
           update_min(&mut shortest_path_initial_state, (0, initial_state));
-          break
+          break;
         }
         Step(l, _) => {
           update_min(&mut shortest_path_initial_state, (l, initial_state));
-        },
+        }
         CycleSentinel => unreachable!(),
       }
     }
@@ -113,7 +119,7 @@ impl Graph {
 
   fn dp(&self, cache: &mut DpCache, state: DpState) -> DpValueAction {
     if let Some(val_action) = cache.get(&state) {
-      return *val_action
+      return *val_action;
     }
 
     let n = &self.nodes[state.node];
@@ -126,8 +132,10 @@ impl Graph {
 
       let mut best_val_action = None;
 
-      for e in self.edges.predecessors(state.node) { // FIXME - need to ignore fake SCC nodes here
-        let new_state = DpState{ node: e.from, deadline: state.deadline - e.weight };
+      for e in self.edges.predecessors(state.node)
+        .filter(|e| matches!(&e.kind, EdgeKind::Regular))
+      {
+        let new_state = DpState { node: e.from, deadline: state.deadline - e.weight };
         let mut val = match self.dp(cache, new_state) {
           Pruned => continue,
           CycleSentinel => continue,
@@ -159,15 +167,16 @@ mod tests {
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
   use crate::test_utils::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
+  use crate::viz::GraphViz;
 
 
   fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphSpec> {
     strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0))
-    .prop_map(|mut g| {
-      g.nodes.first_mut().unwrap().lb = 1;
-      g.nodes.last_mut().unwrap().ub = 0;
-      g
-    })
+      .prop_map(|mut g| {
+        g.nodes.first_mut().unwrap().lb = 1;
+        g.nodes.last_mut().unwrap().ub = 0;
+        g
+      })
   }
 
   fn iis_graph() -> impl SharableStrategy<Value=GraphSpec> {
@@ -213,8 +222,8 @@ mod tests {
       let iis = g.compute_iis(true);
       prop_assert!(iis.edges.len() < g.nodes.len());
 
-      let mut edge_sum : Weight = 0;
-      for &(i,j) in &iis.edges {
+      let mut edge_sum: Weight = 0;
+      for &(i, j) in &iis.edges {
         edge_sum += g.edges.find_edge(i, j).weight;
       }
 
@@ -227,13 +236,47 @@ mod tests {
     }
   }
 
+  fn path_iis(path: Vec<usize>) -> Iis {
+    let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
+    let edges: FnvHashSet<_> = path.windows(2)
+      .map(|w| (w[0], w[1]))
+      .collect();
+    Iis { bounds, edges, graph_id: u32::MAX }
+  }
+
+  struct Testcases;
+
+  impl Testcases {
+    fn check_handling_of_scc(g: &mut Graph, true_iis: Iis) -> GraphTestcaseResult {
+      match g.solve() {
+        SolveStatus::Infeasible(InfKind::Path) => {
+          let iis = g.compute_iis(true);
+          let checks = || {
+            graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
+            graph_testcase_assert_eq!(true_iis.edges, iis.edges);
+            Ok(())
+          };
+          checks().iis(iis)?;
+        }
+        status => {
+          Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?
+        }
+      };
+      Ok(())
+    }
+  }
+
+  graph_testcases! { Testcases;
+    check_handling_of_scc(meta)
+    ["multiple-sccs-0.pi", path_iis(vec![0, 3, 4, 5])]
+    ["multiple-sccs-1.pi", path_iis(vec![0, 1, 2, 6, 4, 5])]
+  }
   // graph_test_dbg!(Tests; find_and_remove_iis);
 
-  graph_tests!{
+  graph_proptests! {
     Tests;
     graph_with_single_path_iis() => find_single_path_iis;
     graph_with_single_path_iis() => find_and_remove_iis;
     iis_graph() => find_path_iis;
   }
-
 }

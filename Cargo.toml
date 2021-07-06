@@ -24,7 +24,6 @@ default = ["tests-gurobi", "arrayvec", "smallvec"]
 tests-gurobi = ["grb", "lazy_static"]
 
 [dev-dependencies]
-
 test-case = "1.1.0"
 
 [[bin]]

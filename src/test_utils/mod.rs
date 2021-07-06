@@ -25,13 +25,21 @@ use anyhow::Context;
 use std::ffi::OsString;
 use std::marker::PhantomData;
 use std::fmt;
+use crate::iis::Iis;
 
-// pub(crate) fn test_input_dir() -> &'static Path {
-//   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs"))
-// }
+pub(crate) fn test_manual_input(name: &str) -> PathBuf {
+  let input_dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs/"));
+  let mut p = input_dir.join(name).into_os_string();
+  p.push(".txt");
+  PathBuf::from(p)
+}
 
 pub(crate) fn test_failures_dir() -> &'static Path {
   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/failures"))
+}
+
+pub(crate) fn test_testcase_failures_dir() -> &'static Path {
+  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcase_failures"))
 }
 
 pub(crate) fn test_regressions_dir() -> &'static Path {
@@ -160,7 +168,7 @@ impl TestManifest {
   }
 }
 
-pub struct GraphTestRunner<'a> {
+pub struct GraphProptestRunner<'a> {
   id: &'a str,
   cpus: u32,
   skip_regressions: bool,
@@ -248,7 +256,7 @@ enum GraphTestMode {
   Debug,
 }
 
-impl<'a> GraphTestRunner<'a> {
+impl<'a> GraphProptestRunner<'a> {
   pub fn new_with_layout_prog(id: &'a str, layout: LayoutAlgo) -> Self {
     let mut config = ProptestConfig::with_cases(1000);
     // keep track of regressions ourselves, since we have a unified input format
@@ -256,7 +264,7 @@ impl<'a> GraphTestRunner<'a> {
     config.result_cache = prop::test_runner::basic_result_cache;
     config.max_shrink_iters = 50_000;
     config.max_shrink_time = 30_000; // in millis
-    GraphTestRunner {
+    GraphProptestRunner {
       id,
       cpus: 1,
       skip_regressions: false,
@@ -440,8 +448,136 @@ impl<'a> GraphTestRunner<'a> {
       Ok(()) => {}
     }
   }
+}
+
+pub type GraphTestcaseResult = Result<(), ErrorWithGraphContext>;
+
+pub trait TestcaseTest {
+  type Function: Copy + Sized + 'static;
+  type TestInput;
+  type Meta;
+
+  fn split(raw: Self::TestInput) -> (&'static str, Self::Meta);
+
+  fn run(test: Self::Function, graph: &mut Graph, data: &GraphSpec, input: Self::Meta) -> GraphTestcaseResult;
+}
 
 
+impl TestcaseTest for SimpleTest {
+  type Function = fn(&mut Graph) -> GraphTestcaseResult;
+  type TestInput = &'static str;
+  type Meta = ();
+  fn split(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
+
+  fn run(test: Self::Function, graph: &mut Graph, _: &GraphSpec, _: Self::Meta) -> GraphTestcaseResult {
+    (test)(graph)
+  }
+}
+
+
+impl<M: 'static> TestcaseTest for TestWithMeta<M> {
+  type Function = fn(&mut Graph, M) -> GraphTestcaseResult;
+  type TestInput = (&'static str, M);
+  type Meta = M;
+  fn split(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
+
+  fn run(test: Self::Function, graph: &mut Graph, _: &GraphSpec, meta: Self::Meta) -> GraphTestcaseResult {
+    (test)(graph, meta)
+  }
+}
+
+
+
+#[derive(Debug)]
+pub struct ErrorWithGraphContext {
+  error: anyhow::Error,
+  iis: Option<Iis>
+}
+
+pub trait GraphContext: Sized {
+  type Output;
+
+  fn iis(self, iis: Iis) -> Self::Output;
+}
+
+impl GraphContext for ErrorWithGraphContext {
+  type Output = Self;
+
+  fn iis(mut self, iis: Iis) -> Self::Output {
+    self.iis = Some(iis);
+    self
+  }
+}
+
+impl GraphContext for anyhow::Error {
+  type Output = ErrorWithGraphContext;
+
+  fn iis(mut self, iis: Iis) -> Self::Output {
+    ErrorWithGraphContext {
+      error: self,
+      iis: Some(iis),
+    }
+  }
+}
+
+impl<T, E> GraphContext for Result<T, E>
+  where
+    T: Sized,
+    E: GraphContext<Output=ErrorWithGraphContext>
+{
+  type Output = Result<T, ErrorWithGraphContext>;
+
+  fn iis(mut self, iis: Iis) -> Self::Output {
+    self.map_err(|e| e.iis(iis))
+  }
+}
+
+
+impl<E: Into<anyhow::Error>> From<E> for ErrorWithGraphContext {
+  fn from(error: E) -> Self {
+    ErrorWithGraphContext{ error: error.into(), iis: None }
+  }
+}
+
+pub struct GraphTestcaseRunner<'a, T: TestcaseTest> {
+  id: &'a str,
+  layout: LayoutAlgo,
+  test: T::Function
+}
+
+
+impl<'a, T: TestcaseTest> GraphTestcaseRunner<'a, T> {
+  pub fn new_with_layout_prog(id: &'a str, test: T::Function, layout: LayoutAlgo) -> Self {
+    GraphTestcaseRunner {
+      id,
+      layout,
+      test,
+    }
+  }
+
+  pub fn new(id: &'a str, test: T::Function) -> Self {
+    Self::new_with_layout_prog(id, test, LayoutAlgo::Dot)
+  }
+
+  pub fn run(&self, input: T::TestInput)
+  {
+    let (input_basename, meta) = T::split(input);
+    let data =  GraphSpec::load_from_file(test_manual_input(input_basename)).unwrap();
+    let mut graph = data.build();
+    let result = T::run(self.test, &mut graph, &data, meta);
+    if let Err(ErrorWithGraphContext{ error, iis }) = result {
+      let mut path = test_testcase_failures_dir().join(format!("{}.input.svg", self.id));
+      data.save_svg_with_layout(&path, self.layout);
+      path.set_file_name(format!("{}.output.svg", self.id));
+      let mut gv = graph.viz();
+      if let Some(iis) = iis.as_ref() {
+        gv = gv.iis(iis);
+      }
+      gv.save_svg_with_layout(path, self.layout);
+      eprintln!("test case failure (input {}):\n{:?}", input_basename, error);
+      panic!("test failed");
+    }
+  }
 }
 
 
@@ -459,18 +595,72 @@ macro_rules! test_case_bail {
     };
 }
 
+#[macro_export]
+macro_rules! graph_testcase_assert {
+  ($cond:expr $(,)?) => {{
+    graph_testcase_assert!($cond, "assertion failed: {}: {}", file!(), line!())
+  }};
+
+  ($cond:expr, $($arg:tt)+) => {{
+    let cond = $cond;
+    if !cond {
+      return Err(anyhow::anyhow!($($arg)*))
+    }
+  }};
+}
 
 #[macro_export]
-macro_rules! graph_tests {
+macro_rules! graph_testcase_assert_eq {
+  ($a:expr, $b:expr $(,)?) => {{
+    graph_testcase_assert!($a == $b, "values not equal: {:?} != {:?}", &$a, &$b)
+  }};
+}
+
+#[macro_export]
+macro_rules! graph_testcase_assert_ne {
+  ($a:expr, $b:expr $(,)?) => {{
+    graph_testcase_assert!($a != $b, "values are equal: {:?} == {:?}", &$a, &$b)
+  }};
+}
+
+#[macro_export]
+macro_rules! graph_testcases {
+  ($m:path; $test_function:ident$(($($test_type_spec:tt)*))? $([$($input:tt)*])+ ) => {
+    // $(
+      #[test]
+      fn $test_function() {
+        let mut runner = GraphTestcaseRunner::<'_, graph_proptests!(@TT_SPEC $($($test_type_spec)*)*)>::new(stringify!($test_function), <$m>::$test_function);
+        $(
+          runner.run(graph_testcases!(@INPUT $($input)*));
+        )*
+      }
+    // )*
+  };
+
+  (@INPUT $input:literal) => {
+    $input
+  };
+
+  (@INPUT $input:literal, $meta:expr) => {
+    ($input, $meta)
+  };
+
+  (@KW $runner:ident : ) => {};
+
+}
+
+
+#[macro_export]
+macro_rules! graph_proptests {
   ($m:path; $($strategy:expr => $test:ident$(($($test_type_spec:tt)*))? $([$($kwargs:tt)+])? ; )+) => {
     $(
       #[test]
       fn $test() {
-        let mut runner = GraphTestRunner::new(stringify!($test));
+        let mut runner = GraphProptestRunner::new(stringify!($test));
         $(
-          graph_tests!(@KW runner : $($kwargs)* );
+          graph_proptests!(@KW runner : $($kwargs)* );
         )*;
-        runner.run::<graph_tests!(@TT_SPEC $($($test_type_spec)*)*), _>($strategy, <$m>::$test)
+        runner.run::<graph_proptests!(@TT_SPEC $($($test_type_spec)*)*), _>($strategy, <$m>::$test)
       }
     )*
   };
@@ -498,45 +688,46 @@ macro_rules! graph_tests {
   (@KW $runner:ident : layout = $layout:expr $( , $($tail:tt)* )? ) => {
     $runner.layout($layout);
     $(
-      graph_tests!(@KW $runner : $($tail)*);
+      graph_proptests!(@KW $runner : $($tail)*);
     )*
   };
 
   (@KW $runner:ident : cases = $n:expr $(, $($tail:tt)* )?) => {
     $runner.cases($n);
     $(
-      graph_tests!(@KW $runner : $($tail)*);
+      graph_proptests!(@KW $runner : $($tail)*);
     )*
   };
 
   (@KW $runner:ident : skip_regressions $(, $($tail:tt)* )?) => {
     $runner.skip_regressions();
     $(
-      graph_tests!(@KW $runner : $($tail)*);
+      graph_proptests!(@KW $runner : $($tail)*);
     )*
   };
 
   (@KW $runner:ident : deterministic $(, $($tail:tt)* )?) => {
     $runner.deterministic();
     $(
-      graph_tests!(@KW $runner : $($tail)*);
+      graph_proptests!(@KW $runner : $($tail)*);
     )*
   };
 
   (@KW $runner:ident : parallel = $n:literal $(, $($tail:tt)* )?) => {
     $runner.cpus($n);
     $(
-      graph_tests!(@KW $runner : $($tail)*);
+      graph_proptests!(@KW $runner : $($tail)*);
     )*
   };
 }
 
 #[macro_export]
-macro_rules! graph_test_dbg {
+macro_rules! graph_proptest_dbg {
       ($m:path; $test:ident$(($($test_type_spec:tt)*))?) => {
         #[test]
         fn dbg() {
-          GraphTestRunner::new(stringify!($test)).debug::<graph_tests!(@TT_SPEC $($($test_type_spec)*)*)>(<$m>::$test);
+          GraphProptestRunner::new(stringify!($test))
+          .debug::<graph_proptests!(@TT_SPEC $($($test_type_spec)*)*)>(<$m>::$test);
         }
       };
   }

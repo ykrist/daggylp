@@ -504,7 +504,7 @@ mod tests {
 
   // graph_test_dbg!(Tests; cbi_triangular_graph_iis_size);
 
-  graph_tests! {
+  graph_proptests! {
     Tests;
     // Triangular graphs with a single non-zero edge
     cei_triangular_graph() =>

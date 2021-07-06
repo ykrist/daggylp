@@ -393,7 +393,7 @@ mod tests {
     }
   }
 
-  graph_tests!(
+  graph_proptests!(
     Tests;
     set_arbitrary_edge_to_one(complete_graph_zero_edges(default_nodes(2..=8)))
       => count_cycles_and_iis_complete_graph [layout=LayoutAlgo::Fdp];
