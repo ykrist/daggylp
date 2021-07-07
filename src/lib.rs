@@ -64,19 +64,40 @@ impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 
 #[cfg(test)]
 mod egg {
+  use super::*;
+  use crate::graph::*;
+  use crate::test_utils::*;
   use daggylp_macros::*;
 
   #[graph_test]
   #[input("input_name.f", sccs="show", layout="neato")]
-  fn foo() {
+  fn foo(graph: &mut Graph) -> GraphTestResult {
     println!("hello world");
+    Ok(())
+  }
+
+  #[test]
+  fn foo_test() {
+    fn inner(graph: &mut Graph) -> GraphTestResult {
+      println!("hello world");
+      Ok(())
+    }
+
+    let runner = GraphTestRunner::new("foo", Simplt);
+    runner.run("simple.f")
   }
 
   #[graph_proptest(debug, sccs="show", layout="neato")]
   #[strategy(hello_world(34 + 5))]
-  fn bar() {
+  fn bar(g: &mut Graph) {
+    println!()
+  }
+
+  #[test]
+  fn bar_test() {
 
   }
+
 }
 
 // #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
