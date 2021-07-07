@@ -68,35 +68,38 @@ mod egg {
   use crate::graph::*;
   use crate::test_utils::*;
   use daggylp_macros::*;
+  use crate::test_utils::strategy::{complete_graph_nonzero_edges, any_nodes};
+  use proptest::prelude::*;
+  use proptest::test_runner::TestCaseResult;
+  use crate::viz::{SccViz, LayoutAlgo, VizConfig};
 
   #[graph_test]
-  #[input("input_name.f", sccs="show", layout="neato")]
+  #[config(sccs="hide")]
+  #[input("simple.f")]
+  #[config(layout="neato")]
+  #[input("simple-cycle.f")]
   fn foo(graph: &mut Graph) -> GraphTestResult {
     println!("hello world");
     Ok(())
   }
 
-  #[test]
-  fn foo_test() {
-    fn inner(graph: &mut Graph) -> GraphTestResult {
-      println!("hello world");
-      Ok(())
-    }
-
-    let runner = GraphTestRunner::new("foo", Simplt);
-    runner.run("simple.f")
+  // #[graph_proptest(debug, sccs="show", layout="neato")]
+  #[graph_proptest(skip_regressions)]
+  #[config(sccs="show", layout="neato", cases=100)]
+  #[input(complete_graph_nonzero_edges(any_nodes(3..10)))]
+  #[input(complete_graph_nonzero_edges(any_nodes(10..20)))]
+  fn bar(g: &mut Graph) -> GraphProptestResult {
+    Ok(())
   }
 
-  #[graph_proptest(debug, sccs="show", layout="neato")]
-  #[strategy(hello_world(34 + 5))]
-  fn bar(g: &mut Graph) {
-    println!()
+  // #[graph_proptest(debug, sccs="show", layout="neato")]
+  #[graph_proptest(deterministic)]
+  #[config(sccs="show", layout="neato", cases=100, cpus=4)]
+  #[input(complete_graph_nonzero_edges(any_nodes(3..10)).prop_map(|x| (x, 2u8)))]
+  fn baz(g: &mut Graph, s: u8) -> TestCaseResult {
+    Ok(())
   }
 
-  #[test]
-  fn bar_test() {
-
-  }
 
 }
 
