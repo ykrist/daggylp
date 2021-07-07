@@ -82,86 +82,61 @@ enum LpSolution {
 }
 
 
-//
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
-//   #[macro_use]
-//   use crate::*;
-//   use crate::test_utils::*;
-//   use crate::test_utils::strategy::*;
-//   use crate::graph::*;
-//   use proptest::prelude::*;
 
-  // fn graph_without_solution() -> impl SharableStrategy<Value=GraphSpec> {
-  //   (3..=4usize)
-  //     .prop_flat_map(|size| graph(size, any_nodes(), 0..MAX_EDGE_WEIGHT))
-  //     .prop_map(|g| {
-  //       // let s = Lp::build(&g).solve().unwrap();
-  //       g
-  //     })
-  // }
+#[cfg(test)]
+mod tests {
+  use super::*;
+  #[macro_use]
+  use crate::*;
+  use crate::test_utils::*;
+  use crate::test_utils::strategy::*;
+  use crate::graph::*;
+  use proptest::prelude::*;
 
-  // fn compare_feas_with_lp(path: impl AsRef<Path>) {
-  //   let mut graph = GraphSpec::load_from_file(path).build();
-  //   for n in graph.nodes.iter_mut() {
-  //     n.obj = 1;
-  //   }
-  //
-  //   let mut lp = Lp::from_graph(&graph);
-  //
-  //   assert_eq!(graph.solve(), SolveStatus::Optimal);
-  //   lp.model.optimize().unwrap();
-  //   assert_eq!(lp.model.status(), Ok(Status::Optimal));
-  //
-  //   for (n, (lp_var, node)) in lp.vars.iter().zip(&graph.nodes).enumerate() {
-  //     let lp_x = lp.model.get_obj_attr(attr::X, lp_var).unwrap().round() as Weight;
-  //     if lp_x != node.x {
-  //       graph.viz().save_svg(test_output("test-failed.svg"));
-  //       panic!("Difference at node {} {:?}:\n\tLP = {} != {} = Graph",n, node,  lp_x, node.x)
-  //     }
-  //   }
-  // }
-  //
-  // #[test]
-  // fn feasible_test_cases() {
-  //   let patt = test_input_dir().join("*-f.txt");
-  //   dbg!(&patt);
-  //   for p in glob::glob(patt.to_str().unwrap()).unwrap() {
-  //     let p = p.unwrap();
-  //     println!("checking {:?}", &p);
-  //     compare_feas_with_lp(p);
-  //   }
-  // }
+  #[graph_test]
+  #[input("*.f")]
+  fn compare_feasible(g: &mut Graph, data: &GraphSpec) -> GraphTestResult {
+    // Need to set objective values to nonzero so Gurobi will minimise
+    let mut data = data.clone();
+    for n in data.nodes.iter_mut() {
+      n.obj = 1;
+    }
+    g.nodes.first_mut().unwrap().obj = 1;
+    g.nodes.get_mut(9).map(|n| n.obj = 1);
+    let mut lp = Lp::build(&data);
+    let s = lp.solve().unwrap();
+    match (g.solve(), s) {
+      (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
+        let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_))).map(|n| n.x).collect();
+        graph_testcase_assert_eq!(graph_soln, solution);
+      },
+      (g_status, lp_status) => {
+        Err(anyhow::anyhow!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status))?;
+      }
+    }
+    Ok(())
+  }
 
-//   struct Tests;
-//   impl Tests {
-//     fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> TestCaseResult {
-//       let mut lp = Lp::build(data);
-//       let s = lp.solve().unwrap();
-//       match (g.solve(), s) {
-//         (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
-//           let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| matches!(n.kind, NodeKind::Var)).map(|n| n.x).collect();
-//           prop_assert_eq!(graph_soln, solution);
-//         },
-//         (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {
-//
-//         }
-//         (g_status, lp_status) => {
-//           test_case_bail!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status)
-//         }
-//       }
-//
-//       Ok(())
-//     }
-//   }
-//
-//   // graph_test_dbg!{ Tests; compare_daggylp_with_gurobi _ }
-//
-//   graph_proptests!{
-//     Tests;
-//     graph(any_nodes(3..300), any_edge_weight()) => compare_daggylp_with_gurobi(data) [cases=500, parallel=4, layout=LayoutAlgo::Fdp];
-//   }
-//
-//
-// }
+
+  #[graph_proptest]
+  #[config(cases=500, cpus=4, layout="fdp")]
+  #[input(graph(any_nodes(3..300), any_edge_weight()))]
+  fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> GraphProptestResult {
+    let mut lp = Lp::build(data);
+    let s = lp.solve().unwrap();
+    match (g.solve(), s) {
+      (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
+        let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_))).map(|n| n.x).collect();
+        prop_assert_eq!(graph_soln, solution);
+      },
+      (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {
+
+      }
+      (g_status, lp_status) => {
+        test_case_bail!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status)
+      }
+    }
+    Ok(())
+  }
+
+}

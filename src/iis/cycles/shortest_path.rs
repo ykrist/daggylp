@@ -403,116 +403,108 @@ impl<E: EdgeLookup> Graph<E> {
     best_iis
   }
 }
-//
-// #[cfg(test)]
-// mod tests {
-//   #[macro_use]
-//   use crate::*;
-//
-//   use crate::test_utils::{*, strategy::SharableStrategy};
-//   use crate::graph::{ModelState, Graph};
-//   use proptest::prelude::*;
-//   use proptest::test_runner::TestCaseResult;
-//   use crate::test_utils::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
-//   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
-//   use crate::viz::LayoutAlgo;
-//
-//   fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
-//     (3..200usize)
-//       .prop_flat_map(|mut size| {
-//       // ensure the graph has enough nodes that the last row (highest rank) doesn't
-//       // have any lonely nodes (otherwise we don't have a SCC graph)
-//       let last_node = size - 1;
-//       let rank = inverse_triangular_number(last_node);
-//       if last_node < triangular_number(rank - 1) + 2 {
-//         size += 1;
-//       }
-//       set_arbitrary_edge_to_one(graph_with_conn(default_nodes(size), Triangular(), Just(0)))
-//     })
-//   }
-//
-//   fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
-//     (1..=13usize)
-//       .prop_flat_map(|mut rank| {
-//       let size = triangular_number(rank) + 1;
-//       graph_with_conn(prop::collection::vec(Just(NodeData { lb: 0, ub: 4, obj: 0 }), size), Triangular(), Just(0))
-//     })
-//       .prop_map(|mut g| {
-//         g.nodes.last_mut().unwrap().lb = 2;
-//         g.nodes.first_mut().unwrap().ub = 1;
-//         g
-//       })
-//   }
-//
-//
-//   struct Tests;
-//
-//   impl Tests {
-//     fn cei_triangular_graph_iis_size(g: &mut Graph) -> TestCaseResult {
-//       g.solve();
-//       let (sccs, first_inf_scc) = match &g.state {
-//         ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-//         other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
-//       };
-//       prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
-//       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
-//       prop_assert_eq!(iis.len(), 3);
-//       Ok(())
-//     }
-//
-//     fn cbi_triangular_graph_iis_size(g: &mut Graph) -> TestCaseResult {
-//       let t = std::time::Instant::now();
-//
-//       let iis_size = 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
-//       g.solve();
-//       // println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
-//       let (sccs, first_inf_scc) = match &g.state {
-//         ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-//         other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
-//       };
-//       let t = std::time::Instant::now();
-//       prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
-//       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
-//       prop_assert_eq!(iis.len(), iis_size);
-//       // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
-//       let no_iis = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
-//       prop_assert_eq!(no_iis, None);
-//       let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
-//       match iis2 {
-//         Some(iis2) => prop_assert_eq!(iis2.len(), iis.len()),
-//         None => test_case_bail!("no iis found")
-//       }
-//
-//       Ok(())
-//     }
-//
-//     fn mixed_cycle_inf_triangular_graph(g: &mut Graph) -> TestCaseResult {
-//       g.solve();
-//       let (sccs, first_inf_scc) = match &g.state {
-//         ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-//         other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
-//       };
-//       prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
-//
-//       let t = std::time::Instant::now();
-//       let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
-//       prop_assert_eq!(iis.len(), 3);
-//       // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
-//       Ok(())
-//     }
-//   }
-//
-//   // graph_test_dbg!(Tests; cbi_triangular_graph_iis_size);
-//
-//   graph_proptests! {
-//     Tests;
-//     // Triangular graphs with a single non-zero edge
-//     cei_triangular_graph() =>
-//     cei_triangular_graph_iis_size [layout=LayoutAlgo::Fdp];
-//     // Triangular graphs with a zero edges and a bound infeasibile (LB is the top of the triangle, UB is the bottom-right)
-//     cbi_triangular_graph() =>
-//     cbi_triangular_graph_iis_size [layout=LayoutAlgo::Fdp];
-//     cbi_triangular_graph().prop_map(|mut g| { g.edges.values_mut().for_each(|w| *w = 1); g })
-//     => mixed_cycle_inf_triangular_graph [layout=LayoutAlgo::Fdp];
-//   }
-// }
+
+#[cfg(test)]
+mod tests {
+  #[macro_use]
+  use crate::*;
+
+  use crate::test_utils::{*, strategy::SharableStrategy};
+  use crate::graph::{ModelState, Graph};
+  use proptest::prelude::*;
+  use proptest::test_runner::TestCaseResult;
+  use crate::test_utils::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
+  use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
+  use crate::viz::LayoutAlgo;
+
+  /// Triangular graphs with a single non-zero edge
+  fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+    (3..200usize)
+      .prop_flat_map(|mut size| {
+      // ensure the graph has enough nodes that the last row (highest rank) doesn't
+      // have any lonely nodes (otherwise we don't have a SCC graph)
+      let last_node = size - 1;
+      let rank = inverse_triangular_number(last_node);
+      if last_node < triangular_number(rank - 1) + 2 {
+        size += 1;
+      }
+      set_arbitrary_edge_to_one(graph_with_conn(default_nodes(size), Triangular(), Just(0)))
+    })
+  }
+
+  /// Triangular graphs with a zero edges and a bound infeasible (LB is the top of the triangle, UB is the bottom-right)
+  fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+    (1..=13usize)
+      .prop_flat_map(|mut rank| {
+      let size = triangular_number(rank) + 1;
+      graph_with_conn(prop::collection::vec(Just(NodeData { lb: 0, ub: 4, obj: 0 }), size), Triangular(), Just(0))
+    })
+      .prop_map(|mut g| {
+        g.nodes.last_mut().unwrap().lb = 2;
+        g.nodes.first_mut().unwrap().ub = 1;
+        g
+      })
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(cei_triangular_graph())]
+  fn cei_triangular_graph_iis_size(g: &mut Graph) -> GraphProptestResult {
+    g.solve();
+    let (sccs, first_inf_scc) = match &g.state {
+      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+    };
+    prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    prop_assert_eq!(iis.len(), 3);
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(cbi_triangular_graph())]
+  fn cbi_triangular_graph_iis_size(g: &mut Graph) -> GraphProptestResult {
+    let t = std::time::Instant::now();
+
+    let iis_size = 3 * inverse_triangular_number(g.nodes.len() - 1) /* num edges */ + 2 /* bounds */;
+    g.solve();
+    // println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+    let (sccs, first_inf_scc) = match &g.state {
+      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+    };
+    let t = std::time::Instant::now();
+    prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    prop_assert_eq!(iis.len(), iis_size);
+    // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+    let no_iis = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
+    prop_assert_eq!(no_iis, None);
+    let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
+    match iis2 {
+      Some(iis2) => prop_assert_eq!(iis2.len(), iis.len()),
+      None => test_case_bail!("no iis found")
+    }
+
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(cbi_triangular_graph().prop_map(|mut g| { g.edges.values_mut().for_each(|w| *w = 1); g }))]
+  fn multi_cycle_inf_triangular_graph(g: &mut Graph) -> GraphProptestResult {
+    g.solve();
+    let (sccs, first_inf_scc) = match &g.state {
+      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+    };
+    prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
+
+    let t = std::time::Instant::now();
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    prop_assert_eq!(iis.len(), 3);
+    // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
+    Ok(())
+  }
+}

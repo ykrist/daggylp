@@ -1,12 +1,10 @@
 mod generators;
-mod test_cases;
 #[cfg(feature = "tests-gurobi")]
 mod lp;
 pub mod strategy;
 
 pub(crate) use generators::*;
 
-pub use test_cases::generate_test_cases;
 use crate::viz::{GraphViz, LayoutAlgo, SccViz, VizConfig};
 use crate::graph::Graph;
 
@@ -27,13 +25,17 @@ use std::marker::PhantomData;
 use std::fmt;
 use crate::iis::Iis;
 use std::process::Output;
-
+pub use daggylp_macros::{graph_test, graph_proptest};
 
 pub(crate) fn test_manual_input(name: &str) -> PathBuf {
   let input_dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs/"));
   let mut p = input_dir.join(name).into_os_string();
   p.push(".txt");
   PathBuf::from(p)
+}
+
+pub(crate) fn test_input_dir() -> &'static Path {
+  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/inputs/"))
 }
 
 pub(crate) fn test_failures_dir() -> &'static Path {
@@ -47,6 +49,22 @@ pub(crate) fn test_testcase_failures_dir() -> &'static Path {
 pub(crate) fn test_regressions_dir() -> &'static Path {
   Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/regressions"))
 }
+
+
+pub fn get_test_id(module_path: &str, ident: &str) -> String {
+  let mut s = String::with_capacity(module_path.len());
+  let mut path = module_path.split("::").skip(1).peekable();
+
+  while let Some(part) = path.next() {
+    if path.peek().is_some() {
+      s.push_str(part);
+      s.push('_');
+    }
+  }
+  s.push_str(ident);
+  s
+}
+
 
 fn is_unit_ty<M: 'static>() -> bool {
   use std::any::TypeId;
@@ -261,8 +279,8 @@ enum GraphTestMode {
   Debug,
 }
 
-pub struct GraphProptestRunner<'a, F> {
-  id: &'a str,
+pub struct GraphProptestRunner<F> {
+  id: String,
   test: F,
   cpus: u32,
   skip_regressions: bool,
@@ -272,8 +290,8 @@ pub struct GraphProptestRunner<'a, F> {
   run_count: u32,
 }
 
-impl<'a, F: GraphProptest> GraphProptestRunner<'a, F> {
-  pub fn new(id: &'a str, test: F) -> Self {
+impl<F: GraphProptest> GraphProptestRunner<F> {
+  pub fn new(id: String, test: F) -> Self {
     let mut config = ProptestConfig::with_cases(1000);
     // keep track of regressions ourselves, since we have a unified input format
     config.failure_persistence = Some(Box::new(FileFailurePersistence::Off));
@@ -293,7 +311,7 @@ impl<'a, F: GraphProptest> GraphProptestRunner<'a, F> {
   }
 
   fn manifest(&self, mode: GraphTestMode) -> TestManifest {
-    TestManifest::new(self.id, mode)
+    TestManifest::new(&self.id, mode)
   }
 
   fn handle_test_result(&self, result: Result<(), TestError<F::SValue>>) {
@@ -424,7 +442,7 @@ impl<'a, F: GraphProptest> GraphProptestRunner<'a, F> {
   }
 
   fn find_regressions(&self) -> anyhow::Result<Vec<TestManifest>> {
-    let search_path = test_regressions_dir().join(self.id);
+    let search_path = test_regressions_dir().join(&self.id);
     let mut search_path = search_path.into_os_string().into_string().unwrap();
     search_path.push_str("/*.manifest.json");
     glob::glob(&search_path).unwrap()
@@ -468,11 +486,12 @@ impl<'a, F: GraphProptest> GraphProptestRunner<'a, F> {
   }
 }
 
+
 pub type GraphTestResult = Result<(), ErrorWithGraphContext>;
 
 pub trait GraphTest {
   type TestInput;
-  type Meta;
+  type Meta: Clone;
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta);
 
@@ -488,6 +507,39 @@ impl GraphTest for SimpleTest<GraphTestResult> {
 
   fn run(&self, graph: &mut Graph, _: &GraphSpec, _: Self::Meta) -> GraphTestResult {
     (self.0)(graph)
+  }
+}
+
+impl GraphTest for TestWithData<GraphTestResult> {
+  type Meta = ();
+  type TestInput = &'static str;
+
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
+
+  fn run(&self, graph: &mut Graph, data: &GraphSpec, _: Self::Meta) -> GraphTestResult {
+    (self.0)(graph, data)
+  }
+}
+
+impl<M: Clone> GraphTest for TestWithMeta<GraphTestResult, M> {
+  type Meta = M;
+  type TestInput = (&'static str, M);
+
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
+
+  fn run(&self, graph: &mut Graph, _: &GraphSpec, meta: Self::Meta) -> GraphTestResult {
+    (self.0)(graph, meta)
+  }
+}
+
+impl<M: Clone> GraphTest for ComplexTest<GraphTestResult, M> {
+  type Meta = M;
+  type TestInput = (&'static str, M);
+
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
+
+  fn run(&self, graph: &mut Graph, data: &GraphSpec, meta: Self::Meta) -> GraphTestResult {
+    (self.0)(graph, data, meta)
   }
 }
 
@@ -543,15 +595,28 @@ impl<E: Into<anyhow::Error>> From<E> for ErrorWithGraphContext {
   }
 }
 
-pub struct GraphTestRunner<'a, F> {
-  id: &'a str,
+pub struct GraphTestRunner<F> {
+  id: String,
   pub viz_config: VizConfig,
   test: F,
 }
 
+fn glob_graph_inputs(input_pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+  let mut patt = test_input_dir().to_str().unwrap().to_string();
+  patt.push('/');
+  patt.push_str(input_pattern);
+  patt.push_str(".txt");
+  let paths : Result<Vec<_>, _> = glob::glob(&patt)?
+    .collect();
+  let paths = paths?;
+  if paths.is_empty() {
+    anyhow::bail!("no inputs matching pattern `{}` found", &patt)
+  }
+  Ok(paths)
+}
 
-impl<'a, F: GraphTest> GraphTestRunner<'a, F> {
-  pub fn new(id: &'a str, test: F) -> Self {
+impl<F: GraphTest> GraphTestRunner<F> {
+  pub fn new(id: String, test: F) -> Self {
     GraphTestRunner {
       id,
       viz_config: Default::default(),
@@ -561,22 +626,25 @@ impl<'a, F: GraphTest> GraphTestRunner<'a, F> {
 
   pub fn run(&self, input: F::TestInput)
   {
-    let (input_basename, meta) = F::split_meta(input);
-    let data = GraphSpec::load_from_file(test_manual_input(input_basename)).unwrap();
-    let mut graph = data.build();
-    let result = self.test.run(&mut graph, &data, meta);
-    if let Err(ErrorWithGraphContext { error, iis }) = result {
-      let mut path = test_testcase_failures_dir().join(format!("{}.input.svg", self.id));
-      data.viz().configure(self.viz_config).save_svg(&path);
-      path.set_file_name(format!("{}.output.svg", self.id));
-      let mut gv = graph.viz().configure(self.viz_config);
-      if let Some(iis) = iis.as_ref() {
-        gv = gv.iis(iis);
+    let (input_patt, meta) = F::split_meta(input);
+    for input in glob_graph_inputs(input_patt).pretty_unwrap() {
+      let data = GraphSpec::load_from_file(&input).unwrap();
+      let mut graph = data.build();
+      let result = self.test.run(&mut graph, &data, meta.clone());
+      if let Err(ErrorWithGraphContext { error, iis }) = result {
+        let mut path = test_testcase_failures_dir().join(format!("{}.input.svg", self.id));
+        data.viz().configure(self.viz_config).save_svg(&path);
+        path.set_file_name(format!("{}.output.svg", self.id));
+        let mut gv = graph.viz().configure(self.viz_config);
+        if let Some(iis) = iis.as_ref() {
+          gv = gv.iis(iis);
+        }
+        gv.save_svg(path);
+        eprintln!("test case failure (input {:?}):\n{:?}", input.file_stem().unwrap(), error);
+        panic!("test failed");
       }
-      gv.save_svg(path);
-      eprintln!("test case failure (input {}):\n{:?}", input_basename, error);
-      panic!("test failed");
     }
+
   }
 
   pub fn viz_config(&mut self) -> &mut VizConfig {
@@ -691,4 +759,14 @@ impl<T> PrettyUnwrap for anyhow::Result<T> {
   }
 }
 
-
+#[test]
+fn test_id_from_module_path() {
+  assert_eq!(
+    &get_test_id("daggylp::scc::tests", "foobar"),
+    "scc_foobar"
+  );
+  assert_eq!(
+    &get_test_id("daggylp::iis::cycles::enumeration::tests", "foobar"),
+    "iis_cycles_enumeration_foobar"
+  );
+}

@@ -24,13 +24,6 @@ daggylp_macros = { path = "./daggylp_macros"}
 default = ["tests-gurobi", "arrayvec", "smallvec"]
 tests-gurobi = ["grb", "lazy_static"]
 
-[dev-dependencies]
-test-case = "1.1.0"
-
-[[bin]]
-name = "generate-test-cases"
-path = "src/bin/generate-test-cases.rs"
-
 [[bin]]
 name = "mark-failed-as-regression"
 path = "src/bin/mark-failed-as-regression.rs"

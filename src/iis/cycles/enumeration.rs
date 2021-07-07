@@ -323,81 +323,76 @@ impl<E: EdgeLookup> Graph<E> {
   }
 }
 
-//
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
-//   use proptest::prelude::*;
-//   use crate::test_utils::*;
-//   use crate::test_utils::strategy::*;
-//   use crate::*;
-//
-//   enum Tests {}
-//   impl Tests {
-//     fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> TestCaseResult {
-//       let num_nodes = g.nodes.len();
-//       g.solve();
-//       let (sccs, first_inf_scc) = match &g.state {
-//         ModelState::InfCycle { sccs, first_inf_scc } => (&*sccs, *first_inf_scc),
-//         _ => return Err(TestCaseError::fail("should find infeasible cycles")),
-//       };
-//       prop_assert_eq!(g.sccs.len(), 0, "SCCs should only be present when feasible");
-//       prop_assert_eq!(sccs.len(), 1, "Complete graph has one SCC");
-//       let mut cycle_cnt = g.iter_cycles(sccs).count() as u128;
-//       prop_assert_eq!(cycle_cnt, n_cycles);
-//       let mut iis_cnt = g.iter_cyclic_iis(&sccs[first_inf_scc..]).count() as u128;
-//       prop_assert_eq!(iis_cnt, n_iis);
-//       Ok(())
-//     }
-//
-//     pub fn count_cycles_and_iis_cycle_graph(g: &mut Graph) -> TestCaseResult {
-//       let n_iis = if g.edges.all_edges().any(|e| e.weight != 0) {
-//         1
-//       } else {
-//         0
-//       };
-//       Self::check_iis_and_cycles_counts(g, n_iis, 1)
-//     }
-//
-//     pub fn count_cycles_and_iis_complete_graph(g: &mut Graph) -> TestCaseResult {
-//       let n = g.nodes.len();
-//
-//       // Number of cycles of length k is `(n choose k) / k`
-//       let n_cycles = {
-//         let mut c = 0;
-//         for k in 2..=n {
-//           let mut q: u128 = (n - k + 1) as u128;
-//           for x in (n - k + 2)..=n {
-//             q *= (x as u128);
-//           }
-//           c += q / (k as u128);
-//         }
-//         c
-//       };
-//
-//       // One edge `(i, j)` has non-zero weight, so number of k-cycles o.t.f
-//       // `[i, ... seq of length k-2, ..., j]` is `(n - 2 choose k - 2)`
-//       let n_iis = {
-//         let mut total = 0u128;
-//         for k in 2..=n {
-//           let mut prod = 1;
-//           for i in (n - k + 1)..=(n - 2) { // may be empty if k == 2
-//             prod *= i as u128;
-//           }
-//           total += prod;
-//         }
-//         total
-//       };
-//
-//       Self::check_iis_and_cycles_counts(g, n_iis, n_cycles)
-//     }
-//   }
-//
-//   graph_proptests!(
-//     Tests;
-//     set_arbitrary_edge_to_one(complete_graph_zero_edges(default_nodes(2..=8)))
-//       => count_cycles_and_iis_complete_graph [layout=LayoutAlgo::Fdp];
-//     graph_with_conn(default_nodes(2..1000), Cycle::new(), any_edge_weight())
-//       => count_cycles_and_iis_cycle_graph [layout=LayoutAlgo::Fdp];
-//   );
-// }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use proptest::prelude::*;
+  use crate::test_utils::*;
+  use crate::test_utils::strategy::*;
+  use crate::*;
+
+  fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> GraphProptestResult {
+    let num_nodes = g.nodes.len();
+    g.solve();
+    let (sccs, first_inf_scc) = match &g.state {
+      ModelState::InfCycle { sccs, first_inf_scc } => (&*sccs, *first_inf_scc),
+      _ => return Err(TestCaseError::fail("should find infeasible cycles")),
+    };
+    prop_assert_eq!(g.sccs.len(), 0, "SCCs should only be present when feasible");
+    prop_assert_eq!(sccs.len(), 1, "Complete graph has one SCC");
+    let mut cycle_cnt = g.iter_cycles(sccs).count() as u128;
+    prop_assert_eq!(cycle_cnt, n_cycles);
+    let mut iis_cnt = g.iter_cyclic_iis(&sccs[first_inf_scc..]).count() as u128;
+    prop_assert_eq!(iis_cnt, n_iis);
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(graph_with_conn(default_nodes(2..1000), Cycle::new(), any_edge_weight()))]
+  fn count_cycles_and_iis_cycle_graph(g: &mut Graph) -> GraphProptestResult {
+    let n_iis = if g.edges.all_edges().any(|e| e.weight != 0) {
+      1
+    } else {
+      0
+    };
+    check_iis_and_cycles_counts(g, n_iis, 1)
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(set_arbitrary_edge_to_one(complete_graph_zero_edges(default_nodes(2..=8))))]
+  fn count_cycles_and_iis_complete_graph(g: &mut Graph) -> GraphProptestResult {
+    let n = g.nodes.len();
+
+    // Number of cycles of length k is `(n choose k) / k`
+    let n_cycles = {
+      let mut c = 0;
+      for k in 2..=n {
+        let mut q: u128 = (n - k + 1) as u128;
+        for x in (n - k + 2)..=n {
+          q *= (x as u128);
+        }
+        c += q / (k as u128);
+      }
+      c
+    };
+
+    // One edge `(i, j)` has non-zero weight, so number of k-cycles o.t.f
+    // `[i, ... seq of length k-2, ..., j]` is `(n - 2 choose k - 2)`
+    let n_iis = {
+      let mut total = 0u128;
+      for k in 2..=n {
+        let mut prod = 1;
+        for i in (n - k + 1)..=(n - 2) { // may be empty if k == 2
+          prod *= i as u128;
+        }
+        total += prod;
+      }
+      total
+    };
+
+    check_iis_and_cycles_counts(g, n_iis, n_cycles)
+  }
+}

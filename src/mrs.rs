@@ -35,7 +35,7 @@ impl GraphId for MrsTree {
 impl MrsTree {
   fn build(graph: &Graph, root: usize) -> Self {
     let r = &graph.nodes[root];
-    
+
     let mut nodes = vec![MrsTreeNode {
       node: root,
       parent_idx: usize::MAX,
@@ -46,13 +46,13 @@ impl MrsTree {
       lb: r.lb,
       obj: r.obj,
     }];
-    
+
     let mut tree = MrsTree { graph_id: graph.graph_id(), nodes };
     tree.build_recursive(graph, root);
     debug_assert_eq!(tree.nodes[0].subtree_end, tree.nodes.len());
     tree
   }
-  
+
   fn build_recursive(&mut self, graph: &Graph, root: usize) {
     let idx_of_root = self.nodes.len() - 1;
     for e in graph.edges.successors(root) {
@@ -82,7 +82,7 @@ impl MrsTree {
     }
     self.nodes[idx_of_root].subtree_end = self.nodes.len();
   }
-  
+
   pub fn vars(&self) -> impl Iterator<Item=Var> + '_ {
     self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
   }
@@ -117,7 +117,7 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
       if j != root && scc.contains(&j) {
         match &mut nodes[j].active_pred {
           ap @ None => *ap = Some(i),
-          Some(_) => {},
+          Some(_) => {}
         }
         queue.push_back(j);
       }
@@ -174,7 +174,7 @@ impl Graph {
       .map(|r| MrsTree::build(self, r))
       .collect()
   }
-  
+
   /// Marks the path to the MRS root, returning the root if the root has never been visited and None if it has.
   fn mark_path_to_mrs_root(&self, is_in_mrs: &mut [bool], n: usize, node: &Node) -> Option<usize> { // TODO this should happen after the active edge re-labelling
     if !is_in_mrs[n] {
@@ -252,89 +252,70 @@ impl Graph {
   }
 }
 
-//
-// #[cfg(test)]
-// mod tests {
-//   #[macro_use]
-//   use crate::*;
-//   use super::*;
-//   use crate::test_utils::{*, strategy::*};
-//   use crate::viz::*;
-//   use test_case::test_case;
-//   use SolveStatus::*;
-//   use InfKind::*;
-//   use proptest::prelude::*;
-//   use proptest::test_runner::TestCaseResult;
-//   use crate::graph::SolveStatus;
-//
-//
-//   struct Tests;
-//   impl Tests {
-//     fn trivial_objective_gives_empty_mrs(g: &mut Graph) -> TestCaseResult {
-//       let status = g.solve();
-//       prop_assert_matches!(status, SolveStatus::Optimal);
-//       prop_assert_eq!(g.compute_mrs().len(), 0);
-//       Ok(())
-//     }
-//
-//     fn mrs_are_disjoint(g: &mut Graph) -> TestCaseResult {
-//       let status = g.solve();
-//       prop_assert_matches!(status, SolveStatus::Optimal);
-//
-//       let mut seen_vars = FnvHashSet::default();
-//       let mut seen_cons = FnvHashSet::default();
-//       let mrs = g.compute_mrs();
-//       prop_assert!(mrs.len() > 0, "MRS should not be empty");
-//       println!("{:?}", mrs);
-//       for mrs in mrs {
-//         for v in mrs.vars() {
-//           let unseen = seen_vars.insert(v);
-//           prop_assert!(unseen, "MRS is not disjoint, seen_vars = {:?}", &seen_vars);
-//         }
-//         for c in mrs.constrs() {
-//           let unseen = seen_cons.insert(c);
-//           prop_assert!(unseen, "MRS is not disjoint, seen_cons = {:?}", &seen_cons);
-//         }
-//       }
-//       Ok(())
-//     }
-//
-//
-//     fn mrs_forest(g: &mut Graph) -> GraphTestcaseResult {
-//       if matches!(g.solve(), SolveStatus::Infeasible(_)) {
-//         Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
-//       }
-//       let mut mrs = g.compute_mrs();
-//       graph_testcase_assert_eq!(mrs.len(), 1);
-//       let mrs = mrs.pop().unwrap();
-//       println!("{:?}", &mrs);
-//       Ok(())
-//     }
-//   }
-//   //
-//   // graph_proptest_dbg!{ Tests;
-//   //   mrs_are_disjoint
-//   //
-//   // }
-//
-//
-//   graph_testcases!{ Tests;
-//     mrs_forest
-//     // ["k4.f", vec![0; 4]; layout=LayoutAlgo::Fdp]
-//     // ["k8.f", vec![0; 8]; layout=LayoutAlgo::Fdp]
-//     // ["simple.f", vec![0, 2, 4]; layout=LayoutAlgo::Fdp]
-//     // ["simple-cycle.f", vec![1, 1, 1, 1, 0, 2]; sccs=SccViz::Hide]
-//     ["multiple-sccs.f"; sccs=SccViz::Hide]
-//   }
-//
-//   graph_proptests!{ Tests;
-//     acyclic_graph(
-//       prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), Just(0)), 1..100),
-//       0..(10 as Weight)
-//     ) => trivial_objective_gives_empty_mrs;
-//     acyclic_graph(
-//       prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
-//       0..(10 as Weight)
-//     ) => mrs_are_disjoint;
-//   }
-// }
+
+#[cfg(test)]
+mod tests {
+  #[macro_use]
+  use crate::*;
+  use super::*;
+  use crate::test_utils::{*, strategy::*};
+  use crate::viz::*;
+  use SolveStatus::*;
+  use InfKind::*;
+  use proptest::prelude::*;
+  use crate::graph::SolveStatus;
+
+  #[graph_proptest]
+  #[input(acyclic_graph(
+    prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), Just(0)), 1..100),
+    0..(10 as Weight)
+  ))]
+  fn trivial_objective_gives_empty(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Optimal);
+    prop_assert_eq!(g.compute_mrs().len(), 0);
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[input(acyclic_graph(
+    prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
+    0..(10 as Weight)
+  ))]
+  fn disjoint(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Optimal);
+
+    let mut seen_vars = FnvHashSet::default();
+    let mut seen_cons = FnvHashSet::default();
+    let mrs = g.compute_mrs();
+    prop_assert!(mrs.len() > 0, "MRS should not be empty");
+    // println!("{:?}", mrs);
+    for mrs in mrs {
+      for v in mrs.vars() {
+        let unseen = seen_vars.insert(v);
+        prop_assert!(unseen, "MRS is not disjoint, seen_vars = {:?}", &seen_vars);
+      }
+      for c in mrs.constrs() {
+        let unseen = seen_cons.insert(c);
+        prop_assert!(unseen, "MRS is not disjoint, seen_cons = {:?}", &seen_cons);
+      }
+    }
+    Ok(())
+  }
+
+  #[graph_test]
+  #[config(sccs="hide")]
+  #[input("multiple-sccs.f")]
+  fn forest(g: &mut Graph) -> GraphTestResult {
+    if matches!(g.solve(), SolveStatus::Infeasible(_)) {
+      Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
+    }
+    let mut mrs = g.compute_mrs();
+    graph_testcase_assert_eq!(mrs.len(), 1);
+    let mrs = mrs.pop().unwrap();
+    println!("{:?}", &mrs);
+    Ok(())
+  }
+
+}

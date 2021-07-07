@@ -221,12 +221,12 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
       NodeKind::Var => "/pastel19/9".to_string(),
     };
 
-    let scc_member_row = if let NodeKind::SccMember(k) = node.kind {
-      format!(r#"<TR><TD COLSPAN="3">SCC[{}]</TD></TR>"#, k)
-    } else {
-      "".to_string()
+    let scc_member_obj_row = match (node.kind, node.obj) {
+      // (NodeKind::SccMember(k), 0) => format!(r#"<TR><TD COLSPAN="3">SCC[{}]</TD></TR>"#, k),
+      (NodeKind::SccMember(k), obj) => format!(r#"<TR><TD>{}</TD><TD COLSPAN="2">SCC[{}]</TD></TR>"#, obj, k),
+      // (_, 0) => "".to_string(),
+      (_, obj) => format!(r#"<TR><TD COLSPAN="3">{}</TD></TR>"#, obj),
     };
-
 
     let html = format!(
       concat!(
@@ -239,7 +239,7 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
       r#"</FONT>"#
       ),
       bg_color, border_color, name,
-      scc_member_row,
+      scc_member_obj_row,
       node.lb, node.x, node.ub,
     );
     LabelText::html(html)

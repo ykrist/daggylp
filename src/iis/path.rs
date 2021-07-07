@@ -158,125 +158,112 @@ impl Graph {
   }
 }
 
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
-//   #[macro_use]
-//   use crate::*;
-//   use crate::test_utils::*;
-//   use proptest::prelude::*;
-//   use proptest::test_runner::TestCaseResult;
-//   use crate::test_utils::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
-//   use crate::viz::GraphViz;
-//
-//
-//   fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphSpec> {
-//     strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0))
-//       .prop_map(|mut g| {
-//         g.nodes.first_mut().unwrap().lb = 1;
-//         g.nodes.last_mut().unwrap().ub = 0;
-//         g
-//       })
-//   }
-//
-//   fn iis_graph() -> impl SharableStrategy<Value=GraphSpec> {
-//     strategy::connected_acyclic_graph(any_bounds_nodes(10..=100), 0..=MAX_EDGE_WEIGHT)
-//   }
-//
-//
-//   struct Tests;
-//
-//   impl Tests {
-//     fn find_and_remove_iis(g: &mut Graph) -> TestCaseResult {
-//       let status = g.solve();
-//       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
-//       let iis = g.compute_iis(true);
-//       let iis_size = iis.len();
-//       g.remove_iis_owned(iis);
-//       let status = g.solve();
-//       match status {
-//         SolveStatus::Infeasible(InfKind::Path) => {
-//           let new_iis = g.compute_iis(true);
-//           prop_assert!(iis_size <= new_iis.len(), "second IIS should be smaller or the same size")
-//         }
-//         SolveStatus::Infeasible(InfKind::Cycle) => {
-//           test_case_bail!("input graph should be acyclic")
-//         }
-//         SolveStatus::Optimal => {}
-//       }
-//       Ok(())
-//     }
-//
-//     fn find_single_path_iis(g: &mut Graph) -> TestCaseResult {
-//       let status = g.solve();
-//       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
-//       let iis = g.compute_iis(true);
-//       prop_assert!(iis.len() - 2 < g.nodes.len());
-//       Ok(())
-//     }
-//
-//     fn find_path_iis(g: &mut Graph) -> TestCaseResult {
-//       let status = g.solve();
-//       prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
-//       prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
-//       let iis = g.compute_iis(true);
-//       prop_assert!(iis.edges.len() < g.nodes.len());
-//
-//       let mut edge_sum: Weight = 0;
-//       for &(i, j) in &iis.edges {
-//         edge_sum += g.edges.find_edge(i, j).weight;
-//       }
-//
-//       prop_assert!(iis.bounds.is_some(), "Bounds in IIS");
-//       let (lb_node, ub_node) = iis.bounds.unwrap();
-//       let lb = g.nodes[lb_node].lb;
-//       let ub = g.nodes[ub_node].ub;
-//       prop_assert!(lb + edge_sum > ub);
-//       Ok(())
-//     }
-//   }
-//
-//   fn path_iis(path: Vec<usize>) -> Iis {
-//     let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
-//     let edges: FnvHashSet<_> = path.windows(2)
-//       .map(|w| (w[0], w[1]))
-//       .collect();
-//     Iis { bounds, edges, graph_id: u32::MAX }
-//   }
-//
-//   struct Testcases;
-//
-//   impl Testcases {
-//     fn check_handling_of_scc(g: &mut Graph, true_iis: Iis) -> GraphTestcaseResult {
-//       match g.solve() {
-//         SolveStatus::Infeasible(InfKind::Path) => {
-//           let iis = g.compute_iis(true);
-//           let checks = || {
-//             graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
-//             graph_testcase_assert_eq!(true_iis.edges, iis.edges);
-//             Ok(())
-//           };
-//           checks().iis(iis)?;
-//         }
-//         status => {
-//           Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?
-//         }
-//       };
-//       Ok(())
-//     }
-//   }
-//
-//   graph_testcases! { Testcases;
-//     check_handling_of_scc(meta)
-//     ["multiple-sccs-0.pi", path_iis(vec![0, 3, 4, 5])]
-//     ["multiple-sccs-1.pi", path_iis(vec![0, 1, 2, 6, 4, 5])]
-//   }
-//   // graph_test_dbg!(Tests; find_and_remove_iis);
-//
-//   graph_proptests! {
-//     Tests;
-//     graph_with_single_path_iis() => find_single_path_iis;
-//     graph_with_single_path_iis() => find_and_remove_iis;
-//     iis_graph() => find_path_iis;
-//   }
-// }
+#[cfg(test)]
+mod tests {
+  use super::*;
+  #[macro_use]
+  use crate::*;
+  use crate::test_utils::*;
+  use proptest::prelude::*;
+  use proptest::test_runner::TestCaseResult;
+  use crate::test_utils::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
+  use crate::viz::GraphViz;
+
+  fn path_iis(path: Vec<usize>) -> Iis {
+    let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
+    let edges: FnvHashSet<_> = path.windows(2)
+      .map(|w| (w[0], w[1]))
+      .collect();
+    Iis { bounds, edges, graph_id: u32::MAX }
+  }
+
+  fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphSpec> {
+    strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0))
+      .prop_map(|mut g| {
+        g.nodes.first_mut().unwrap().lb = 1;
+        g.nodes.last_mut().unwrap().ub = 0;
+        g
+      })
+  }
+
+  fn iis_graph() -> impl SharableStrategy<Value=GraphSpec> {
+    strategy::connected_acyclic_graph(any_bounds_nodes(10..=100), 0..=MAX_EDGE_WEIGHT)
+  }
+
+  #[graph_proptest]
+  #[input(graph_with_single_path_iis())]
+  fn find_and_remove(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
+    let iis = g.compute_iis(true);
+    let iis_size = iis.len();
+    g.remove_iis_owned(iis);
+    let status = g.solve();
+    match status {
+      SolveStatus::Infeasible(InfKind::Path) => {
+        let new_iis = g.compute_iis(true);
+        prop_assert!(iis_size <= new_iis.len(), "second IIS should be smaller or the same size")
+      }
+      SolveStatus::Infeasible(InfKind::Cycle) => {
+        test_case_bail!("input graph should be acyclic")
+      }
+      SolveStatus::Optimal => {}
+    }
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[input(graph_with_single_path_iis())]
+  fn single_path(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
+    let iis = g.compute_iis(true);
+    prop_assert!(iis.len() - 2 < g.nodes.len());
+    Ok(())
+  }
+
+  #[graph_proptest]
+  #[input(iis_graph())]
+  fn multiple_paths(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
+    prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
+    let iis = g.compute_iis(true);
+    prop_assert!(iis.edges.len() < g.nodes.len());
+
+    let mut edge_sum: Weight = 0;
+    for &(i, j) in &iis.edges {
+      edge_sum += g.edges.find_edge(i, j).weight;
+    }
+
+    prop_assert!(iis.bounds.is_some(), "Bounds in IIS");
+    let (lb_node, ub_node) = iis.bounds.unwrap();
+    let lb = g.nodes[lb_node].lb;
+    let ub = g.nodes[ub_node].ub;
+    prop_assert!(lb + edge_sum > ub);
+    Ok(())
+  }
+
+
+
+  #[graph_test]
+  #[input("multiple-sccs-0.pi", path_iis(vec![0, 3, 4, 5]))]
+  #[input("multiple-sccs-1.pi", path_iis(vec![0, 1, 2, 6, 4, 5]))]
+  fn edge_cases(g: &mut Graph, true_iis: Iis) -> GraphTestResult {
+    match g.solve() {
+      SolveStatus::Infeasible(InfKind::Path) => {
+        let iis = g.compute_iis(true);
+        let checks = || {
+          graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
+          graph_testcase_assert_eq!(true_iis.edges, iis.edges);
+          Ok(())
+        };
+        checks().iis(iis)?;
+      }
+      status => {
+        Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?
+      }
+    };
+    Ok(())
+  }
+}

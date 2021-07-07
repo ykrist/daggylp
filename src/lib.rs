@@ -73,34 +73,6 @@ mod egg {
   use proptest::test_runner::TestCaseResult;
   use crate::viz::{SccViz, LayoutAlgo, VizConfig};
 
-  #[graph_test]
-  #[config(sccs="hide")]
-  #[input("simple.f")]
-  #[config(layout="neato")]
-  #[input("simple-cycle.f")]
-  fn foo(graph: &mut Graph) -> GraphTestResult {
-    println!("hello world");
-    Ok(())
-  }
-
-  // #[graph_proptest(debug, sccs="show", layout="neato")]
-  #[graph_proptest(skip_regressions)]
-  #[config(sccs="show", layout="neato", cases=100)]
-  #[input(complete_graph_nonzero_edges(any_nodes(3..10)))]
-  #[input(complete_graph_nonzero_edges(any_nodes(10..20)))]
-  fn bar(g: &mut Graph) -> GraphProptestResult {
-    Ok(())
-  }
-
-  // #[graph_proptest(debug, sccs="show", layout="neato")]
-  #[graph_proptest(deterministic)]
-  #[config(sccs="show", layout="neato", cases=100, cpus=4)]
-  #[input(complete_graph_nonzero_edges(any_nodes(3..10)).prop_map(|x| (x, 2u8)))]
-  fn baz(g: &mut Graph, s: u8) -> TestCaseResult {
-    Ok(())
-  }
-
-
 }
 
 // #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

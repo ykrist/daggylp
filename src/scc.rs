@@ -235,60 +235,53 @@ impl<E: EdgeLookup> Graph<E> {
     self.edges.add_new_component(self.sccs.len(), new_edges);
   }
 }
-//
-// #[cfg(test)]
-// mod tests {
-//   #[macro_use]
-//   use crate::*;
-//   use crate::test_utils::*;
-//   use crate::test_utils::strategy::*;
-//   use proptest::prelude::*;
-//   use serde::{Serialize, Deserialize};
-//   use crate::graph::Graph;
-//   use proptest::test_runner::TestCaseResult;
-//   use crate::viz::LayoutAlgo;
-//
-//   #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-//   struct SccSizeOrder(Vec<usize>);
-//
-//   impl SccSizeOrder {
-//     fn sorted(&self) -> Vec<usize> {
-//       let mut v = self.0.clone();
-//       v.sort();
-//       v
-//     }
-//   }
-//
-//   fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphSpec, SccSizeOrder)> {
-//     let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
-//     prop::collection::vec(scc, 1..=50)
-//       .prop_map(|sccs| {
-//         let sizes = SccSizeOrder(sccs.iter().map(|g| g.nodes.len()).collect());
-//         let conn = (1..sccs.len()).map(|child_scc| {
-//           let parent_scc = (child_scc - 1) / 2;
-//           let conn : Box<dyn Connectivity> = Box::new(AllEdges());
-//           let weights : Box<dyn EdgeWeights> = Box::new(AllSame(1));
-//           (child_scc, parent_scc, conn, weights)
-//         }).collect();
-//         let sz : Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
-//         (GraphSpec::from_components(sccs, conn), sizes)
-//       })
-//   }
-//
-//   struct Tests;
-//   impl Tests {
-//     fn scc_sizes(g: &mut Graph, actual_sizes: SccSizeOrder) -> TestCaseResult {
-//       let sccs = g.find_sccs();
-//       let sizes = SccSizeOrder(sccs.iter().map(|l| l.len()).collect());
-//       prop_assert_eq!(sizes.sorted(), actual_sizes.sorted());
-//       Ok(())
-//     }
-//   }
-//
-//   // graph_test_dbg!(Tests; scc_sizes(meta));
-//
-//   graph_proptests!{
-//     Tests;
-//     multi_scc_graph() => scc_sizes(meta) [layout=LayoutAlgo::Fdp];
-//   }
-// }
+
+#[cfg(test)]
+mod tests {
+  #[macro_use]
+  use crate::*;
+  use crate::test_utils::*;
+  use crate::test_utils::strategy::*;
+  use proptest::prelude::*;
+  use serde::{Serialize, Deserialize};
+  use crate::graph::Graph;
+  use proptest::test_runner::TestCaseResult;
+  use crate::viz::LayoutAlgo;
+
+  #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+  struct SccSizeOrder(Vec<usize>);
+
+  impl SccSizeOrder {
+    fn sorted(&self) -> Vec<usize> {
+      let mut v = self.0.clone();
+      v.sort();
+      v
+    }
+  }
+
+  fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphSpec, SccSizeOrder)> {
+    let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
+    prop::collection::vec(scc, 1..=50)
+      .prop_map(|sccs| {
+        let sizes = SccSizeOrder(sccs.iter().map(|g| g.nodes.len()).collect());
+        let conn = (1..sccs.len()).map(|child_scc| {
+          let parent_scc = (child_scc - 1) / 2;
+          let conn : Box<dyn Connectivity> = Box::new(AllEdges());
+          let weights : Box<dyn EdgeWeights> = Box::new(AllSame(1));
+          (child_scc, parent_scc, conn, weights)
+        }).collect();
+        let sz : Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
+        (GraphSpec::from_components(sccs, conn), sizes)
+      })
+  }
+
+  #[graph_proptest]
+  #[config(layout="fdp")]
+  #[input(multi_scc_graph())]
+  fn sizes(g: &mut Graph, actual_sizes: SccSizeOrder) -> GraphProptestResult {
+    let sccs = g.find_sccs();
+    let sizes = SccSizeOrder(sccs.iter().map(|l| l.len()).collect());
+    prop_assert_eq!(sizes.sorted(), actual_sizes.sorted());
+    Ok(())
+  }
+}
