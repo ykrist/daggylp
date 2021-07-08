@@ -5,25 +5,28 @@ name = "daggylp"
 version = "0.1.0"
 
 [dependencies]
-dot = "0.1.4" # dev
 fnv = "^1.0.7"
-glob = "0.3.0" # dev
-proptest = "1.0.0" # dev
-rand = { version = "0.8.3", features = ["small_rng"]} # dev
-grb = { version = "1.0.4", optional = true } # dev + grb
-anyhow = "1.0.41" # dev
-serde = { version = "1.0.126", features = ["derive"] }  # dev
-serde_json = "1.0.64"  # dev
-lazy_static = { version = "1.4.0", optional = true }
+dot = { version = "0.1.4", optional = true }
 arrayvec = { version = "0.7.1", optional = true}
-smallvec = { version = "1.6.1", features = ["const_generics", "union"], optional = true }
+smallvec = { version = "1.6.1", features = ["const_generics", "union"], optional = true}
+grb = { version = "1.0.4", optional = true } # dev-only
+
+[dev-dependencies]
+glob = "0.3.0"
+proptest = "1.0.0"
+rand = { version = "0.8.3", features = ["small_rng"]}
+anyhow = "1.0.41"
+serde = { version = "1.0.126", features = ["derive"] }
+serde_json = "1.0.64"
 daggylp_macros = { path = "./daggylp_macros"}
 
-
 [features]
-default = ["tests-gurobi", "arrayvec", "smallvec"]
-tests-gurobi = ["grb", "lazy_static"]
+default = ["viz"]
+viz-extra = ["viz"]
+viz = ["dot"]
+test_helpers = []
 
-[[bin]]
-name = "mark-failed-as-regression"
-path = "src/bin/mark-failed-as-regression.rs"
+#[[bin]]
+#name = "mark-failed-as-regression"
+#path = "src/bin/mark-failed-as-regression.rs"
+#required-features = ["test-tools"]

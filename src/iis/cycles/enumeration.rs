@@ -1,9 +1,5 @@
 use super::*;
 use crate::iis::Iis;
-use crate::test::{GraphData};
-use crate::viz::{GraphViz, LayoutAlgo};
-use proptest::prelude::{TestCaseError, Strategy};
-use proptest::test_runner::{TestCaseResult, TestError};
 use crate::edge_storage::{ForwardDir, Neighbours};
 
 pub enum Enumeration {}

@@ -120,21 +120,21 @@ impl Iis {
     bounds.into_iter().flat_map(crate::ArrayIntoIter::new)
   }
 
-  pub fn iter_edge_constraints<'a>(&'a self) -> impl Iterator<Item=Constraint> + 'a {
+  pub fn iter_edge_constraints<'a>(&'a self) -> impl Iterator<Item=(Var, Var)> + 'a {
     self.edges.iter()
-      .map(move |&(i, j)| Constraint::Edge(self.var_from_node_id(i), self.var_from_node_id(j))
+      .map(move |&(i, j)| (self.var_from_node_id(i), self.var_from_node_id(j))
       )
   }
 
   pub fn iter_constraints<'a>(&'a self) -> impl Iterator<Item=Constraint> + 'a {
-    self.iter_bounds().chain(self.iter_edge_constraints())
+    self.iter_bounds().chain(self.iter_edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj)))
   }
 }
 
 impl Graph {
   pub fn compute_iis(&mut self, minimal: bool) -> Iis {
     self.check_allowed_action(ModelAction::ComputeIis).unwrap();
-    match &self.state {
+    let iis = match &self.state {
       ModelState::InfPath(violated_ubs) => {
         self.compute_path_iis(violated_ubs)
       }
@@ -142,6 +142,19 @@ impl Graph {
         self.compute_cyclic_iis(minimal, &sccs[*first_inf_scc..])
       }
       _ => unreachable!()
+    };
+
+    #[cfg(feature = "viz-extra")] {
+      self.viz_data.clear_highlighted();
+      self.viz_data.highlighted_edges.extend(
+        iis.iter_edge_constraints().map(|(vi, vj)| (vi.node, vj.node))
+      );
+      self.viz_data.highlighted_nodes.extend(
+        iis.iter_bounds().map(|c| match c {
+          Constraint::Ub(v) | Constraint::Lb(v) => v.node,
+          _ => unreachable!()
+        }));
     }
+    iis
   }
 }

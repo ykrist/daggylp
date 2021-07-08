@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use proptest::arbitrary::arbitrary;
 use proptest::test_runner::TestRunner;
 use crate::test::SccGraphConn;
-use crate::viz::GraphViz;
 use std::fmt::Debug;
 use std::cmp::min;
 use crate::test::SccGraphConn::Sq;
@@ -350,12 +349,4 @@ pub fn set_arbitrary_edge_to_one(graph: impl SharableStrategy<Value=GraphData>) 
 pub fn sample_strategy<T>(s: impl SharableStrategy<Value=T>) -> T {
   use proptest::strategy::ValueTree;
   s.new_tree(&mut TestRunner::default()).unwrap().current()
-}
-
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use proptest::prelude::*;
-
 }

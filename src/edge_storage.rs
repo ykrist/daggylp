@@ -11,7 +11,6 @@ mod private {
 
 use private::Sealed;
 use std::ops::Deref;
-use dot::Edges;
 use std::hint::unreachable_unchecked;
 use std::mem::MaybeUninit;
 
@@ -303,7 +302,6 @@ mod arrayvec_support {
 
 mod csr_alist {
   use super::*;
-  use serde_json::map::Entry;
 
   #[derive(Debug, Clone)]
   pub struct CsrAdjacencyListBuilder {

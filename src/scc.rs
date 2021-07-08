@@ -4,7 +4,7 @@ use crate::graph::*;
 use crate::set_with_capacity;
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SccInfo {
   pub nodes: FnvHashSet<usize>,
   pub lb_node: usize,
@@ -243,10 +243,8 @@ mod tests {
   use crate::test::*;
   use crate::test::strategy::*;
   use proptest::prelude::*;
-  use serde::{Serialize, Deserialize};
   use crate::graph::Graph;
-  use proptest::test_runner::TestCaseResult;
-  use crate::viz::LayoutAlgo;
+  use serde::{Serialize, Deserialize};
 
   #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
   struct SccSizeOrder(Vec<usize>);

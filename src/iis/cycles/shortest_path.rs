@@ -408,14 +408,10 @@ impl<E: EdgeLookup> Graph<E> {
 mod tests {
   #[macro_use]
   use crate::*;
-
-  use crate::test::{*, strategy::SharableStrategy};
-  use crate::graph::{ModelState, Graph};
+  use crate::test::{*, strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one}};
   use proptest::prelude::*;
-  use proptest::test_runner::TestCaseResult;
-  use crate::test::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
+  use crate::graph::{ModelState, Graph};
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
-  use crate::viz::LayoutAlgo;
 
   /// Triangular graphs with a single non-zero edge
   fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphData> {

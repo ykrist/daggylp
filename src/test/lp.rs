@@ -4,6 +4,7 @@ use crate::map_with_capacity;
 use fnv::FnvHashMap;
 use crate::test::*;
 use crate::graph::*;
+use serde::{Serialize, Deserialize};
 
 thread_local!{
   static ENV: grb::Env = {

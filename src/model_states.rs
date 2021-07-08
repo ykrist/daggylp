@@ -3,11 +3,11 @@ use crate::{Error};
 
 pub(crate) enum ModelAction {
   Solve,
-  ComputeMrs,
+  ComputeOptimalityInfo,
   ComputeIis,
 }
 
-impl Graph {
+impl<E: EdgeLookup> Graph<E> {
   pub(crate) fn check_allowed_action(&self, action: ModelAction) -> Result<(), Error> {
     use ModelState::*;
     use ModelAction::*;
@@ -16,18 +16,18 @@ impl Graph {
       (Solve, _)
       => Ok(()),
 
-      (ComputeMrs, Unsolved)
-      | (ComputeMrs, Dirty{ .. })
+      (ComputeOptimalityInfo, Unsolved)
+      | (ComputeOptimalityInfo, Dirty{ .. })
       | (ComputeIis, Unsolved)
       | (ComputeIis, Dirty{ .. })
       => Err("solve the model first"),
 
-      (ComputeMrs, InfCycle { .. })
-      | (ComputeMrs, InfPath(..))
+      (ComputeOptimalityInfo, InfCycle { .. })
+      | (ComputeOptimalityInfo, InfPath(..))
       => Err("model is infeasible"),
 
-      (ComputeMrs, Optimal)
-      | (ComputeMrs, Mrs)
+      (ComputeOptimalityInfo, Optimal)
+      | (ComputeOptimalityInfo, Mrs)
       => Ok(()),
 
       (ComputeIis, InfPath(..))

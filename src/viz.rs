@@ -1,8 +1,9 @@
 use dot::*;
 use super::graph::*;
 use std::path::Path;
-use crate::test::{GraphData};
 use crate::iis::Iis;
+use fnv::FnvHashSet;
+use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SccViz {
@@ -38,7 +39,7 @@ pub struct VizConfig {
 
 impl Default for VizConfig {
   fn default() -> Self {
-    VizConfig {scc: SccViz::Show, show_edge_weights: true, layout: LayoutAlgo::Dot }
+    VizConfig { scc: SccViz::Show, show_edge_weights: true, layout: LayoutAlgo::Dot }
   }
 }
 
@@ -52,44 +53,59 @@ impl VizConfig {
   }
 
   pub fn layout(&mut self, layout: LayoutAlgo) {
-    self.layout=layout;
+    self.layout = layout;
   }
 }
+
+#[cfg(feature = "viz-extra")]
+#[derive(Debug, Default, Clone)]
+pub struct VizData {
+  pub highlighted_edges: FnvHashSet<(usize, usize)>,
+  pub highlighted_nodes: FnvHashSet<usize>,
+  pub last_solve: Option<SolveStatus>,
+}
+
+#[cfg(feature = "viz-extra")]
+impl VizData {
+  pub fn clear_highlighted(&mut self) {
+    self.highlighted_edges.clear();
+    self.highlighted_nodes.clear();
+  }
+}
+
 
 #[derive(Clone)]
 pub(crate) struct VizGraph<'a> {
   graph: &'a Graph,
-  iis: Option<&'a Iis>,
+  config: VizConfig,
   var_names: Option<&'a dyn Fn(Var) -> String>,
-  config: VizConfig
+  edge_fmt: Option<&'a dyn Fn(Var, Var, Weight) -> String>,
 }
-
 
 
 impl Graph {
   pub(crate) fn viz(&self) -> VizGraph<'_> {
     VizGraph {
       graph: self,
-      iis: None,
-      var_names: None,
       config: Default::default(),
+      var_names: None,
+      edge_fmt: None,
     }
   }
 }
 
 
 impl<'a> VizGraph<'a> {
-  pub fn iis(mut self, iis: &'a Iis) -> Self {
-    self.iis = Some(iis);
-    self
-  }
-
-  pub(crate) fn fmt_nodes(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
+  pub fn fmt_vars(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
     self.var_names = Some(f);
     self
   }
-}
 
+  pub fn fmt_edges(mut self, f: &'a dyn Fn(Var, Var, Weight) -> String) -> Self {
+    self.edge_fmt = Some(f);
+    self
+  }
+}
 
 
 pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + Sized
@@ -136,6 +152,11 @@ pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + 
   }
 }
 
+const MRS_COLOR : &'static str = "blueviolet";
+const IIS_COLOR : &'static str = "orangered";
+const ACTIVE_EDGE_COLOR : &'static str = "lightseagreen";
+const DEFAULT_EDGE_COLOR : &'static str = "grey";
+const DEFAULT_NODE_COLOR : &'static str = "black";
 
 impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   fn nodes(&'a self) -> Nodes<'a, usize> {
@@ -212,11 +233,16 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
       }
     };
 
-    let border_color = self.iis.map(|iis| iis.bounds.as_ref())
-      .flatten()
-      .filter(|(ub, lb)| n == ub || n == lb)
-      .map(|_| "red")
-      .unwrap_or("black");
+
+    let mut border_color = None;
+    #[cfg(feature= "viz-extra")] {
+      match (self.graph.viz_data.last_solve, self.graph.viz_data.highlighted_nodes.contains(n)) {
+        (Some(SolveStatus::Optimal), true) => border_color = Some(MRS_COLOR),
+        (Some(SolveStatus::Infeasible(_)), true) => border_color = Some(IIS_COLOR),
+        _ => {},
+      }
+    }
+    let border_color = border_color.unwrap_or(DEFAULT_NODE_COLOR);
 
     let bg_color = match &self.graph.nodes[*n].kind {
       &NodeKind::SccMember(k) => format!("/pastel19/{}", (k % 8) + 1),
@@ -249,37 +275,40 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
   }
 
   fn edge_color(&'a self, e: &Edge) -> Option<LabelText<'a>> {
-    let is_iis = self.iis
-      .map(|iis| iis.edges.contains(&(e.from, e.to)))
-      .unwrap_or(false);
+    let mut color = None;
 
-    let c = if is_iis {
-      "orangered"
-    } else {
-      match self.graph.nodes[e.to].active_pred {
-        Some(pred) if pred == e.from => "lightseagreen",
-        _ => "grey",
+    #[cfg(feature = "viz-extra")] {
+      match (self.graph.viz_data.last_solve, self.graph.viz_data.highlighted_edges.contains(&(e.from, e.to))) {
+        (Some(SolveStatus::Infeasible(_)), true) => { color = Some(IIS_COLOR); },
+        (Some(SolveStatus::Optimal), true) => { color = Some(MRS_COLOR); },
+        _ => {}
       }
-    };
-    Some(LabelText::escaped(c))
+    }
+
+    if color.is_none() {
+      match self.graph.nodes[e.to].active_pred {
+        Some(pred) if pred == e.from => color = Some(ACTIVE_EDGE_COLOR),
+        _ => {},
+      }
+    }
+
+    Some(LabelText::escaped(color.unwrap_or("grey")))
   }
 
-  fn edge_start_arrow(&self, e: &Edge) -> Arrow {
-    match self.graph.nodes[e.to].active_pred {
-      Some(pred) if pred == e.from => Arrow::from_arrow(ArrowShape::Dot(dot::Fill::Filled)),
-      _ => Arrow::default(),
-    }
-  }
 
   fn edge_label(&self, e: &Edge) -> LabelText {
-    // let s = match e.kind {
-    //   EdgeKind::SccToScc { .. } => "scc2scc=",
-    //   EdgeKind::Regular => "",
-    //   EdgeKind::SccOut(_) => "scc-out=",
-    //   EdgeKind::SccIn(_) => "scc-in=",
-    // };
-    // LabelText::html(format!(r#"<FONT FACE="fantasque sans mono">{}{}</FONT>"#, s, e.weight))
-    LabelText::html(format!(r#"<FONT FACE="fantasque sans mono">{}</FONT>"#, e.weight))
+    let html = if let Some(fmt) = self.edge_fmt {
+      format!(r#"<FONT FACE="fantasque sans mono">{}</FONT>"#,
+              fmt(
+                self.graph.var_from_node_id(e.from),
+                self.graph.var_from_node_id(e.to),
+                e.weight
+              ))
+    } else {
+      format!(r#"<FONT FACE="fantasque sans mono">{}</FONT>"#, e.weight)
+    };
+    LabelText::html(html)
+
   }
 
   fn node_shape(&self, _: &usize) -> Option<LabelText> {
@@ -296,80 +325,91 @@ impl<'a> GraphViz<'a, usize, Edge> for VizGraph<'a> {
   }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct VizGraphSpec<'a> {
-  graph: &'a GraphData,
-  config: VizConfig,
-}
+
+#[cfg(test)]
+pub use viz_graph_data::VizGraphSpec;
+
+#[cfg(test)]
+mod viz_graph_data {
+  use super::*;
+  use crate::test::GraphData;
+
+  #[derive(Copy, Clone, Debug)]
+  pub struct VizGraphSpec<'a> {
+    graph: &'a GraphData,
+    config: VizConfig,
+  }
 
 
-impl GraphData {
-  pub(crate) fn viz(&self) -> VizGraphSpec<'_> {
-    VizGraphSpec {
-      graph: self,
-      config: Default::default(),
+  impl GraphData {
+    pub(crate) fn viz(&self) -> VizGraphSpec<'_> {
+      VizGraphSpec {
+        graph: self,
+        config: Default::default(),
+      }
+    }
+  }
+
+
+  impl<'a> GraphWalk<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
+    fn nodes(&'a self) -> Nodes<'a, usize> {
+      (0..self.graph.nodes.len()).collect::<Vec<_>>().into()
+    }
+
+    fn edges(&'a self) -> Edges<'a, (usize, usize)> {
+      self.graph.edges.keys().copied().collect::<Vec<_>>().into()
+    }
+
+    fn source(&'a self, e: &(usize, usize)) -> usize {
+      e.0
+    }
+
+    fn target(&'a self, e: &(usize, usize)) -> usize {
+      e.1
+    }
+  }
+
+  impl<'a> Labeller<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
+    fn graph_id(&'a self) -> Id<'a> { Id::new("debug").unwrap() }
+
+    fn node_id(&'a self, n: &usize) -> Id<'a> { Id::new(format!("n{}", n)).unwrap() }
+
+    fn node_label(&'a self, n: &usize) -> LabelText {
+      let node = &self.graph.nodes[*n];
+      LabelText::escaped(format!("{}\n[{},{}]", n, node.lb, node.ub))
+    }
+
+    fn edge_label(&self, e: &(usize, usize)) -> LabelText {
+      LabelText::escaped(format!("{}", self.graph.edges[e]))
+    }
+  }
+
+
+  impl<'a> GraphViz<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
+    fn config(&self) -> &VizConfig {
+      &self.config
+    }
+    fn config_mut(&mut self) -> &mut VizConfig {
+      &mut self.config
     }
   }
 }
 
 
-impl<'a> GraphWalk<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
-  fn nodes(&'a self) -> Nodes<'a, usize> {
-    (0..self.graph.nodes.len()).collect::<Vec<_>>().into()
-  }
-
-  fn edges(&'a self) -> Edges<'a, (usize, usize)> {
-    self.graph.edges.keys().copied().collect::<Vec<_>>().into()
-  }
-
-  fn source(&'a self, e: &(usize, usize)) -> usize {
-    e.0
-  }
-
-  fn target(&'a self, e: &(usize, usize)) -> usize {
-    e.1
-  }
-}
-
-impl<'a> Labeller<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
-  fn graph_id(&'a self) -> Id<'a> { Id::new("debug").unwrap() }
-
-  fn node_id(&'a self, n: &usize) -> Id<'a> { Id::new(format!("n{}", n)).unwrap() }
-
-  fn node_label(&'a self, n: &usize) -> LabelText {
-    let node = &self.graph.nodes[*n];
-    LabelText::escaped(format!("{}\n[{},{}]", n, node.lb, node.ub))
-  }
-
-  fn edge_label(&self, e: &(usize, usize)) -> LabelText {
-    LabelText::escaped(format!("{}", self.graph.edges[e]))
-  }
-}
-
-
-impl<'a> GraphViz<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
-  fn config(&self) -> &VizConfig {
-    &self.config
-  }
-  fn config_mut(&mut self) -> &mut VizConfig {
-    &mut self.config
-  }
-}
-
 // #[cfg(test)]
 // mod tests {
-  // use super::*;
-  // use crate::test::*;
-  //
-  // #[test]
-  // fn viz() {
-  //   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap().build();
-  //   g.viz().save_svg(test_output("test.svg"));
-  // }
-  //
-  // #[test]
-  // fn viz_generator() {
-  //   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
-  //   g.save_svg(test_output("test.generator.svg"));
-  // }
+// use super::*;
+// use crate::test::*;
+//
+// #[test]
+// fn viz() {
+//   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap().build();
+//   g.viz().save_svg(test_output("test.svg"));
+// }
+//
+// #[test]
+// fn viz_generator() {
+//   let g = GraphSpec::load_from_file(test_input("simple-f")).pretty_unwrap();
+//   g.save_svg(test_output("test.generator.svg"));
+// }
 // }

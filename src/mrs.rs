@@ -3,8 +3,6 @@ use fnv::FnvHashSet;
 use std::ops::Range;
 use crate::set_with_capacity;
 use std::cmp::{min, max};
-use crate::test::strategy::node;
-use proptest::strategy::W;
 
 #[derive(Debug, Clone)]
 pub struct MrsTreeNode {
@@ -33,7 +31,7 @@ impl GraphId for MrsTree {
 }
 
 impl MrsTree {
-  fn build(graph: &Graph, root: usize) -> Self {
+  fn build(graph: &Graph, in_mrs: &[bool], root: usize) -> Self {
     let r = &graph.nodes[root];
 
     let mut nodes = vec![MrsTreeNode {
@@ -48,23 +46,25 @@ impl MrsTree {
     }];
 
     let mut tree = MrsTree { graph_id: graph.graph_id(), nodes };
-    tree.build_recursive(graph, root);
+    tree.build_recursive(graph, in_mrs, 0);
     debug_assert_eq!(tree.nodes[0].subtree_end, tree.nodes.len());
     tree
   }
 
-  fn build_recursive(&mut self, graph: &Graph, root: usize) {
-    let idx_of_root = self.nodes.len() - 1;
+  fn build_recursive(&mut self, graph: &Graph, in_mrs: &[bool], idx_of_root: usize) {
+    let root = self.nodes[idx_of_root].node;
+    debug_assert_eq!(self.nodes[idx_of_root].node, root);
+    let root_children_start = self.nodes.len();
     for e in graph.edges.successors(root) {
-      if matches!(&e.kind, &EdgeKind::Regular) && graph.nodes[e.to].active_pred == Some(root) {
+      if matches!(&e.kind, &EdgeKind::Regular) && in_mrs[e.to] && graph.nodes[e.to].active_pred == Some(root) {
         let child = &graph.nodes[e.to];
-
+        println!("push node {}", e.to);
         self.nodes.push(MrsTreeNode {
           node: e.to,
           parent_idx: idx_of_root,
-          children_start: idx_of_root,
-          children_end: idx_of_root,
-          subtree_end: idx_of_root,
+          children_start: usize::MAX, // placeholder
+          children_end: usize::MAX, // placeholder
+          subtree_end: usize::MAX, // placeholder
           lb: child.lb,
           obj: child.obj,
           incoming_edge_weight: e.weight,
@@ -72,14 +72,15 @@ impl MrsTree {
         });
       }
     }
-    let root_children_start = idx_of_root + 1;
+
     let root_children_end = self.nodes.len();
     self.nodes[idx_of_root].children_start = root_children_start;
     self.nodes[idx_of_root].children_end = root_children_end;
-
+    println!("set children of node {}: {:?}", root, self.nodes[root_children_start..root_children_end].iter().map(|n| n.node).collect::<Vec<_>>());
     for child in root_children_start..root_children_end {
-      self.build_recursive(graph, self.nodes[child].node)
+      self.build_recursive(graph, in_mrs, child)
     }
+    println!("set subtree of node {}: {:?}", root, self.nodes[root_children_start..self.nodes.len()].iter().map(|n| n.node).collect::<Vec<_>>());
     self.nodes[idx_of_root].subtree_end = self.nodes.len();
   }
 
@@ -87,11 +88,15 @@ impl MrsTree {
     self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
   }
 
-  pub fn constrs(&self) -> impl Iterator<Item=Constraint> + '_ {
+  pub fn edge_constraints(&self) -> impl Iterator<Item=(Var, Var)> + '_ {
+    self.nodes.iter().skip(1).map(move |n| { // first node is root node
+      (self.var_from_node_id(self.nodes[n.parent_idx].node), self.var_from_node_id(n.node))
+    })
+  }
+
+  pub fn constraints(&self) -> impl Iterator<Item=Constraint> + '_ {
     std::iter::once(Constraint::Lb(self.var_from_node_id(self.nodes[0].node)))
-      .chain(self.nodes.iter().skip(1).map(move |n| { // first node is root node
-        Constraint::Edge(self.var_from_node_id(self.nodes[n.parent_idx].node), self.var_from_node_id(n.node))
-      }))
+      .chain(self.edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj)))
   }
 
   /// Computes the optimal solution of the problem defined by a subtree of the MRS.
@@ -119,7 +124,7 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
           ap @ None => {
             *ap = Some(i);
             queue.push_back(j);
-          },
+          }
           Some(_) => {}
         }
       }
@@ -130,7 +135,7 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
 impl Graph {
   /// For each edge in the tree, how much would the objective change if we removed that edge from the MRS?
   /// Does *NOT* account for constraints which are not in the MRS.
-  pub fn edge_sensitivity_analysis(&self, mrs: &MrsTree) -> Vec<((Var, Var), Weight)> {
+  pub fn edge_sensitivity_analysis(&self, mrs: &MrsTree) -> (Weight, Vec<((Var, Var), Weight, Weight)>) {
     // optimal solution for whole tree
     let mut cum_obj_full_tree: Vec<Weight> = mrs.nodes.iter().map(|n| self.nodes[n.node].x).collect();
     // traverse in reverse topological order
@@ -142,7 +147,7 @@ impl Graph {
 
     let mut solution_buf = vec![Weight::MAX; mrs.nodes.len()];
 
-    mrs.nodes.iter().enumerate().skip(1)
+    let edge_obj_diff = mrs.nodes.iter().enumerate().skip(1)
       .map(|(i, node)| {
         let parent_node = &mrs.nodes[node.parent_idx];
         mrs.forward_label_subtree(&mut solution_buf, i);
@@ -151,11 +156,12 @@ impl Graph {
             .zip(&mrs.nodes[node.children_start..node.subtree_end])
             .map(|(&t, n)| t * n.obj)
             .sum::<Weight>();
-        let diff = cum_obj_subtree - cum_obj_full_tree[i];
-        debug_assert!(diff <= 0);
-        ((self.var_from_node_id(parent_node.node), self.var_from_node_id(node.node)), diff)
+        debug_assert!(cum_obj_subtree <= cum_obj_full_tree[i]);
+        ((self.var_from_node_id(parent_node.node), self.var_from_node_id(node.node)), cum_obj_full_tree[i], cum_obj_subtree)
       })
-      .collect()
+      .collect();
+
+    (cum_obj_full_tree[0], edge_obj_diff)
   }
 
   pub fn compute_mrs(&mut self) -> Vec<MrsTree> {
@@ -171,9 +177,23 @@ impl Graph {
         }
       )
       .collect();
+    println!("{:?}", is_in_mrs);
+
+    #[cfg(feature = "viz-extra")] {
+      self.viz_data.clear_highlighted();
+    }
 
     roots.into_iter()
-      .map(|r| MrsTree::build(self, r))
+      .map(|r| {
+        let tree = MrsTree::build(self, &is_in_mrs, r);
+        #[cfg(feature = "viz-extra")] {
+          self.viz_data.highlighted_edges.extend(
+            tree.edge_constraints().map(|(vi, vj)| (vi.node, vj.node))
+          );
+          self.viz_data.highlighted_nodes.insert(r);
+        }
+        tree
+      })
       .collect()
   }
 
@@ -261,16 +281,16 @@ mod tests {
   use crate::*;
   use super::*;
   use crate::test::{*, strategy::*};
-  use crate::viz::*;
   use SolveStatus::*;
   use InfKind::*;
   use proptest::prelude::*;
   use crate::graph::SolveStatus;
+  use fnv::FnvHashMap;
 
   #[graph_proptest]
   #[input(acyclic_graph(
-    prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), Just(0)), 1..100),
-    0..(10 as Weight)
+  prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), Just(0)), 1..100),
+  0..(10 as Weight)
   ))]
   fn trivial_objective_gives_empty(g: &mut Graph) -> GraphProptestResult {
     let status = g.solve();
@@ -281,8 +301,8 @@ mod tests {
 
   #[graph_proptest]
   #[input(acyclic_graph(
-    prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT/2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
-    0..(10 as Weight)
+  prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), 1..MAX_WEIGHT), 50..100),
+  0..(10 as Weight)
   ))]
   fn disjoint(g: &mut Graph) -> GraphProptestResult {
     let status = g.solve();
@@ -298,7 +318,7 @@ mod tests {
         let unseen = seen_vars.insert(v);
         prop_assert!(unseen, "MRS is not disjoint, seen_vars = {:?}", &seen_vars);
       }
-      for c in mrs.constrs() {
+      for c in mrs.constraints() {
         let unseen = seen_cons.insert(c);
         prop_assert!(unseen, "MRS is not disjoint, seen_cons = {:?}", &seen_cons);
       }
@@ -306,12 +326,88 @@ mod tests {
     Ok(())
   }
 
+  fn build_minimal_graph(tree: &MrsTree) -> (FnvHashMap<(Var, Var), (Var, Var)>, Graph) {
+    let mut g = Graph::new();
+
+    let vars: Vec<_> =
+      tree.nodes.iter()
+        .map(|n| g.add_var(n.obj, n.lb, Weight::MAX))
+        .collect();
+
+    let mut g = g.finish_nodes();
+
+    let constraints: FnvHashMap<_, _> = tree.nodes.iter()
+      .enumerate().skip(1)
+      .map(|(j, n)| {
+        let vi = vars[n.parent_idx];
+        let vj = vars[j];
+        let wi = tree.var_from_node_id(tree.nodes[n.parent_idx].node);
+        let wj = tree.var_from_node_id(n.node);
+        println!("{} -> {}", wi.node, wj.node);
+        g.add_constr(vi, n.incoming_edge_weight, vj);
+        ((wi, wj), (vi, vj))
+      })
+      .collect();
+
+    (constraints, g.finish())
+  }
+
+  fn sensitivity_analysis(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Optimal);
+    let computed_obj = g.compute_obj()?;
+    let mut total_obj = 0;
+
+    let mrs = g.compute_mrs();
+    for mrs_tree in mrs {
+      println!("{:#?}", mrs_tree);
+      let (obj, edge_sa) = g.edge_sensitivity_analysis(&mrs_tree);
+      total_obj += obj;
+      let (constr_map, mut subgraph) = build_minimal_graph(&mrs_tree);
+
+      let status = subgraph.solve();
+      // subgraph.viz().save_svg("scrap.svg");
+      prop_assert_matches!(status, SolveStatus::Optimal);
+      let total_obj_mrs = subgraph.compute_obj().unwrap();
+
+      for (e, obj_with_e, obj_without_e) in edge_sa {
+        let mut subgraph_without_e = subgraph.clone();
+        let (vi, vj) = constr_map[&e];
+        subgraph_without_e.remove_edge_constraint(vi, vj);
+        let status = subgraph_without_e.solve();
+        prop_assert_matches!(status, SolveStatus::Optimal);
+        let total_obj_without_e = subgraph_without_e.compute_obj().unwrap();
+        prop_assert_eq!(obj_with_e - obj_without_e, total_obj_mrs - total_obj_without_e, "removing edge {} -> {}", vi.node, vj.node);
+      }
+    }
+    prop_assert_eq!(computed_obj, total_obj);
+    Ok(())
+  }
+
   #[graph_test]
-  #[config(sccs="hide")]
+  #[input("tree.f")]
+  #[config(layout="fdp")]
+  #[input("multiple-sccs-mrs.f")]
+  fn sa_testcases(g: &mut Graph) -> GraphTestResult {
+    sensitivity_analysis(g).into_graph_test()
+  }
+
+  #[graph_proptest]
+  #[input(acyclic_graph(
+  prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), 0..=1i64), 2..100),
+  0..(20 as Weight)
+  ))]
+  fn sa_proptests(g: &mut Graph) -> GraphProptestResult {
+    sensitivity_analysis(g)
+  }
+
+  #[graph_test]
+  #[config(sccs = "hide")]
   #[input("multiple-sccs.f")]
   fn forest(g: &mut Graph) -> GraphTestResult {
     if matches!(g.solve(), SolveStatus::Infeasible(_)) {
-      Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
+      g.compute_iis(true);
+      anyhow::bail!("infeasible")
     }
     let mut mrs = g.compute_mrs();
     graph_testcase_assert_eq!(mrs.len(), 1);
@@ -319,5 +415,4 @@ mod tests {
     println!("{:?}", &mrs);
     Ok(())
   }
-
 }

@@ -467,8 +467,6 @@ impl NodeSpec for IdenticalNodes {
 mod tests {
   use super::*;
   use proptest::prelude::*;
-  use crate::viz::{GraphViz, LayoutAlgo};
-
 
   #[test]
   fn tri_sanity_checks() {

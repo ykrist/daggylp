@@ -165,9 +165,7 @@ mod tests {
   use crate::*;
   use crate::test::*;
   use proptest::prelude::*;
-  use proptest::test_runner::TestCaseResult;
   use crate::test::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
-  use crate::viz::GraphViz;
 
   fn path_iis(path: Vec<usize>) -> Iis {
     let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
@@ -253,12 +251,8 @@ mod tests {
     match g.solve() {
       SolveStatus::Infeasible(InfKind::Path) => {
         let iis = g.compute_iis(true);
-        let checks = || {
-          graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
-          graph_testcase_assert_eq!(true_iis.edges, iis.edges);
-          Ok(())
-        };
-        checks().iis(iis)?;
+        graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
+        graph_testcase_assert_eq!(true_iis.edges, iis.edges);
       }
       status => {
         Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?

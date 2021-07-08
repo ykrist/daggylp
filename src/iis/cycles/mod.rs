@@ -40,13 +40,11 @@ pub struct SccHandle<'a> {
   scc: &'a SccInfo
 }
 
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::test::*;
-  use crate::viz::GraphViz;
-  use proptest::prelude::*;
-
+//
+// #[cfg(test)]
+// mod tests {
+//   use super::*;
+//   use crate::test::*;
 
 //
 //   #[test_case(2)]
@@ -151,4 +149,4 @@ mod tests {
 //     let mut g = k_cycle_graph(k).build();
 //     solve_and_count_cycles_iis(&mut g, 1, k as u128);
 //   }
-}
+// }

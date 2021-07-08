@@ -3,12 +3,15 @@
 #![allow(warnings)]
 mod graph;
 mod mrs;
+#[cfg(any(test, feature = "viz"))]
 mod viz;
 mod iis;
 mod error;
 mod model_states;
 
+#[cfg(test)]
 pub mod test;
+
 mod scc;
 pub mod edge_storage;
 
@@ -62,18 +65,6 @@ impl<T: Copy, const N: usize> Iterator for ArrayIntoIter<T, N> {
 impl<T: Copy, const N: usize> ExactSizeIterator for ArrayIntoIter<T, N> {}
 impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 
-#[cfg(test)]
-mod egg {
-  use super::*;
-  use crate::graph::*;
-  use crate::test::*;
-  use daggylp_macros::*;
-  use crate::test::strategy::{complete_graph_nonzero_edges, any_nodes};
-  use proptest::prelude::*;
-  use proptest::test_runner::TestCaseResult;
-  use crate::viz::{SccViz, LayoutAlgo, VizConfig};
-
-}
 
 // #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 // struct UsizeNiche<const N: usize>(usize);
@@ -148,3 +139,13 @@ mod egg {
 //
 // type IndexNiche = UsizeNiche<{usize::MAX}>;
 //
+
+#[cfg(all(test, feature = "test_helpers"))]
+mod test_helpers {
+  use crate::test;
+  #[test]
+  fn mark_failed_as_regression() -> anyhow::Result<()> {
+      test::mark_failed_as_regression()
+  }
+}
+

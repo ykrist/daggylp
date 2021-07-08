@@ -11,9 +11,9 @@ use std::option::Option::Some;
 use std::iter::{ExactSizeIterator, Map};
 use crate::graph::ModelState::Unsolved;
 use std::borrow::Cow;
-use crate::test::NodeData;
 use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
 pub use crate::edge_storage::{EdgeLookup};
+use crate::model_states::ModelAction;
 
 pub type Weight = i64;
 pub(crate) type NodeIdx = usize;
@@ -143,6 +143,7 @@ macro_rules! impl_graphid {
   };
 }
 
+#[derive(Clone)]
 pub struct Graph<E = AdjacencyList<Vec<Edge>>> {
   id: u32,
   pub(crate) nodes: Vec<Node>,
@@ -151,6 +152,8 @@ pub struct Graph<E = AdjacencyList<Vec<Edge>>> {
   pub(crate) state: ModelState,
   first_scc_node: usize,
   // FIXME make sure this is kept up-to-date
+  #[cfg(feature = "viz-extra")]
+  pub(crate) viz_data: crate::viz::VizData
 }
 
 
@@ -217,6 +220,8 @@ impl<E: EdgeLookup> GraphEdgesBuilder<E> {
       first_scc_node,
       edges: self.edges.finish(),
       state: Unsolved,
+      #[cfg(feature = "viz-extra")]
+      viz_data: Default::default(),
     }
   }
 }
@@ -283,6 +288,10 @@ impl<E: EdgeLookup> Graph<E> {
     self.edges.mark_for_removal(from, to);
   }
 
+  pub fn remove_edge_constraint(&mut self, from: Var, to: Var) {
+    self.remove_edge(from.node, to.node)
+  }
+
   fn mark_dirty_batch(&mut self, edges: impl Iterator<Item=(NodeIdx, NodeIdx)>) {
     for (from, to) in edges {
       if self.mark_dirty(from, to) {
@@ -324,18 +333,46 @@ impl<E: EdgeLookup> Graph<E> {
         self.forward_label().expect("second forward labelling should not find cycles")
       };
     }
-    match &self.state {
+    let status = match &self.state {
       ModelState::InfCycle { .. } => SolveStatus::Infeasible(InfKind::Cycle),
       ModelState::InfPath(_) => SolveStatus::Infeasible(InfKind::Path),
       ModelState::Optimal => SolveStatus::Optimal,
       ModelState::Unsolved | ModelState::Mrs | ModelState::Dirty { .. } => unreachable!(),
+    };
+    #[cfg(feature= "viz-extra")] {
+      self.viz_data.last_solve = Some(status);
     }
+    status
   }
 
   pub(crate) fn edge_to_constraint(&self, e: &Edge) -> Constraint {
     Constraint::Edge(self.var_from_node_id(e.from), self.var_from_node_id(e.to))
   }
 
+  pub fn compute_obj(&mut self) -> Result<Weight, crate::Error> {
+    self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
+    let mut obj = 0;
+    for n in &self.nodes[..self.first_scc_node] {
+      obj += n.obj * n.x;
+    }
+    Ok(obj)
+  }
+
+  // #[cfg(feature = "debug")]
+  // pub fn set_var_names(&mut self, f: impl Fn(Var) -> String) {
+  //   self.viz_data.var_names = Some(Box::new(f));
+  // }
+  //
+  // #[cfg(not(feature = "debug"))]
+  // pub fn set_var_names(&mut self, f: impl Fn(Var) -> String) {
+  //   eprintln!("warning: var names are ignored if the `debug` feature is not selected.")
+  // }
+  //
+  // pub fn clear_var_names(&mut self) {
+  //   #[cfg(feature = "debug")] {
+  //     self.viz_data.var_names = None;
+  //   }
+  // }
 
   fn forward_label<'b>(&'b mut self) -> Option<ModelState> {
     let mut queue = vec![];
@@ -420,7 +457,7 @@ mod tests {
   use crate::*;
   use super::*;
   use crate::test::*;
-  use crate::viz::*;
+  // use crate::viz::*;
   use SolveStatus::*;
   use InfKind::*;
 
@@ -436,7 +473,8 @@ mod tests {
   fn solve_feasible(g: &mut Graph, solution: Vec<Weight>) -> GraphTestResult {
     println!("{}", g.nodes.len());
     if matches!(g.solve(), SolveStatus::Infeasible(_)) {
-      Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
+      g.compute_iis(true);
+      anyhow::bail!("infeasible")
     }
     g.compute_mrs();
     let x: Vec<_> = g.nodes[..g.first_scc_node].iter().map(|n| n.x).collect();
