@@ -3,7 +3,7 @@ use fnv::FnvHashSet;
 use std::ops::Range;
 use crate::set_with_capacity;
 use std::cmp::{min, max};
-use crate::test_utils::strategy::node;
+use crate::test::strategy::node;
 use proptest::strategy::W;
 
 #[derive(Debug, Clone)]
@@ -260,7 +260,7 @@ mod tests {
   #[macro_use]
   use crate::*;
   use super::*;
-  use crate::test_utils::{*, strategy::*};
+  use crate::test::{*, strategy::*};
   use crate::viz::*;
   use SolveStatus::*;
   use InfKind::*;

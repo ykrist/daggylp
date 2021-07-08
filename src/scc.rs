@@ -240,8 +240,8 @@ impl<E: EdgeLookup> Graph<E> {
 mod tests {
   #[macro_use]
   use crate::*;
-  use crate::test_utils::*;
-  use crate::test_utils::strategy::*;
+  use crate::test::*;
+  use crate::test::strategy::*;
   use proptest::prelude::*;
   use serde::{Serialize, Deserialize};
   use crate::graph::Graph;
@@ -259,7 +259,7 @@ mod tests {
     }
   }
 
-  fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphSpec, SccSizeOrder)> {
+  fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphData, SccSizeOrder)> {
     let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
     prop::collection::vec(scc, 1..=50)
       .prop_map(|sccs| {
@@ -271,7 +271,7 @@ mod tests {
           (child_scc, parent_scc, conn, weights)
         }).collect();
         let sz : Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
-        (GraphSpec::from_components(sccs, conn), sizes)
+        (GraphData::from_components(sccs, conn), sizes)
       })
   }
 

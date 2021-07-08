@@ -11,7 +11,7 @@ use std::option::Option::Some;
 use std::iter::{ExactSizeIterator, Map};
 use crate::graph::ModelState::Unsolved;
 use std::borrow::Cow;
-use crate::test_utils::NodeData;
+use crate::test::NodeData;
 use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
 pub use crate::edge_storage::{EdgeLookup};
 
@@ -419,7 +419,7 @@ mod tests {
   #[macro_use]
   use crate::*;
   use super::*;
-  use crate::test_utils::*;
+  use crate::test::*;
   use crate::viz::*;
   use SolveStatus::*;
   use InfKind::*;

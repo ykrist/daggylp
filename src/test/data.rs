@@ -5,7 +5,7 @@ use proptest::option::of;
 use std::fmt;
 use std::io::Write;
 use anyhow::Context;
-use crate::test_utils::strategy::node;
+use crate::test::strategy::node;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NodeData {
@@ -21,7 +21,7 @@ impl fmt::Debug for NodeData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GraphSpec {
+pub struct GraphData {
   pub nodes: Vec<NodeData>,
   pub edges: FnvHashMap<(usize, usize), Weight>,
 }
@@ -37,7 +37,7 @@ impl fmt::Display for ParsingError {
 
 impl std::error::Error for ParsingError {}
 
-impl GraphSpec {
+impl GraphData {
   pub fn build(&self) -> Graph {
     let mut g = Graph::new();
 
@@ -62,7 +62,7 @@ impl GraphSpec {
   }
 
   pub fn with_node_and_edge_data(nodes: Vec<NodeData>, edges: FnvHashMap<(usize, usize), Weight>) -> Self {
-    GraphSpec{ nodes, edges }
+    GraphData { nodes, edges }
   }
 
   pub fn with_node_data(nodes: Vec<NodeData>, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
@@ -77,7 +77,7 @@ impl GraphSpec {
       .map(move |(i, j)| ((i, j), edge_weights.weight(i, j)))
       .collect();
 
-    GraphSpec { nodes, edges }
+    GraphData { nodes, edges }
   }
 
   pub fn new(size: usize, mut nodes: impl NodeSpec, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
@@ -139,10 +139,10 @@ impl GraphSpec {
         }
       }
     }
-    Ok(GraphSpec { nodes, edges })
+    Ok(GraphData { nodes, edges })
   }
 
-  pub fn from_components(subgraphs: Vec<GraphSpec>, conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>) -> Self {
+  pub fn from_components(subgraphs: Vec<GraphData>, conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>) -> Self {
     let subgraph_size: Vec<_> = subgraphs.iter().map(|g| g.nodes.len()).collect();
     let offsets: Vec<_> = {
       let mut offset = &mut 0;

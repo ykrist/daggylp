@@ -1,5 +1,5 @@
-#![allow(warnings)]
 use quote::ToTokens;
+use proc_macro2::Span;
 
 macro_rules! parse_error {
     ($tokens:expr => $msg:expr) => {
@@ -36,9 +36,13 @@ mod graph_proptest;
 
 #[proc_macro_attribute]
 pub fn graph_test(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  if !attr.is_empty() {
+    return syn::Error::new( Span::call_site(), "attribute does not accept parameters")
+      .to_compile_error().into()
+  }
   let test_cases = syn::parse_macro_input!(item as GraphTest);
   test_cases.to_token_stream().into()
-  // Default::default()
+
 }
 
 #[proc_macro_attribute]
@@ -46,7 +50,5 @@ pub fn graph_proptest(attr: proc_macro::TokenStream, item: proc_macro::TokenStre
   let mut proptest = syn::parse_macro_input!(item as graph_proptest::GraphProptest);
   let global_settings = syn::parse_macro_input!(attr as graph_proptest::GlobalSettings);
   proptest.global_settings = Some(global_settings);
-
   proptest.to_token_stream().into()
-
 }

@@ -8,7 +8,7 @@ mod iis;
 mod error;
 mod model_states;
 
-pub mod test_utils;
+pub mod test;
 mod scc;
 pub mod edge_storage;
 
@@ -66,9 +66,9 @@ impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 mod egg {
   use super::*;
   use crate::graph::*;
-  use crate::test_utils::*;
+  use crate::test::*;
   use daggylp_macros::*;
-  use crate::test_utils::strategy::{complete_graph_nonzero_edges, any_nodes};
+  use crate::test::strategy::{complete_graph_nonzero_edges, any_nodes};
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
   use crate::viz::{SccViz, LayoutAlgo, VizConfig};

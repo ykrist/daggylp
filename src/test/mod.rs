@@ -1,9 +1,9 @@
-mod generators;
+mod data;
 #[cfg(feature = "tests-gurobi")]
 mod lp;
 pub mod strategy;
 
-pub(crate) use generators::*;
+pub(crate) use data::*;
 
 use crate::viz::{GraphViz, LayoutAlgo, SccViz, VizConfig};
 use crate::graph::Graph;
@@ -12,10 +12,10 @@ use proptest::test_runner::{TestCaseError, TestError, FileFailurePersistence, Te
 use proptest::prelude::*;
 use std::path::{PathBuf, Path};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use crate::test_utils::strategy::SccKind;
+use crate::test::strategy::SccKind;
 use glob::MatchOptions;
 use std::borrow::Cow;
-use crate::test_utils::GraphTestMode::Regression;
+use crate::test::GraphTestMode::Regression;
 use std::sync::mpsc;
 pub use strategy::SharableStrategy;
 
@@ -158,12 +158,12 @@ impl TestManifest {
     Ok(())
   }
 
-  fn write_input(&self, g: &GraphSpec) -> anyhow::Result<()> {
+  fn write_input(&self, g: &GraphData) -> anyhow::Result<()> {
     g.save_to_file(self.path.with_file_name(&self.input));
     Ok(())
   }
 
-  fn write_input_graph(&self, g: &GraphSpec, config: VizConfig) -> anyhow::Result<()> {
+  fn write_input_graph(&self, g: &GraphData, config: VizConfig) -> anyhow::Result<()> {
     g.viz().configure(config).save_svg(self.path.with_file_name(&self.input_graph));
     Ok(())
   }
@@ -173,8 +173,8 @@ impl TestManifest {
     Ok(())
   }
 
-  fn load_input(&self) -> anyhow::Result<GraphSpec> {
-    GraphSpec::load_from_file(self.path.with_file_name(&self.input))
+  fn load_input(&self) -> anyhow::Result<GraphData> {
+    GraphData::load_from_file(self.path.with_file_name(&self.input))
   }
 
   fn load_meta<F: GraphProptest>(&self) -> anyhow::Result<F::Meta> {
@@ -192,9 +192,9 @@ pub struct SimpleTest<R>(pub fn(&mut Graph) -> R);
 
 pub struct TestWithMeta<R, M>(pub fn(&mut Graph, M) -> R);
 
-pub struct TestWithData<R>(pub fn(&mut Graph, &GraphSpec) -> R);
+pub struct TestWithData<R>(pub fn(&mut Graph, &GraphData) -> R);
 
-pub struct ComplexTest<R, M>(pub fn(&mut Graph, &GraphSpec, M) -> R);
+pub struct ComplexTest<R, M>(pub fn(&mut Graph, &GraphData, M) -> R);
 
 macro_rules! impl_copy_clone {
     ([$($param:tt)*] $($ty:tt)+) => {
@@ -218,44 +218,44 @@ pub trait GraphProptest: Sized + Copy + Send + Sync + 'static {
 
   fn constant_meta() -> Option<Self::Meta> { None }
 
-  fn split_input(sval: Self::SValue) -> (GraphSpec, Self::Meta);
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta);
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, meta: Self::Meta) -> GraphProptestResult;
+  fn run(&self, graph: &mut Graph, data: &GraphData, meta: Self::Meta) -> GraphProptestResult;
 }
 
 impl GraphProptest for SimpleTest<GraphProptestResult> {
   type Meta = ();
-  type SValue = GraphSpec;
+  type SValue = GraphData;
 
   fn constant_meta() -> Option<()> { Some(()) }
 
-  fn split_input(sval: Self::SValue) -> (GraphSpec, Self::Meta) { (sval, ()) }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { (sval, ()) }
 
-  fn run(&self, graph: &mut Graph, _: &GraphSpec, _: Self::Meta) -> GraphProptestResult {
+  fn run(&self, graph: &mut Graph, _: &GraphData, _: Self::Meta) -> GraphProptestResult {
     self.0(graph)
   }
 }
 
 impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest for TestWithMeta<GraphProptestResult, M> {
   type Meta = M;
-  type SValue = (GraphSpec, M);
+  type SValue = (GraphData, M);
 
-  fn split_input(sval: Self::SValue) -> (GraphSpec, Self::Meta) { sval }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { sval }
 
-  fn run(&self, graph: &mut Graph, _: &GraphSpec, meta: Self::Meta) -> GraphProptestResult {
+  fn run(&self, graph: &mut Graph, _: &GraphData, meta: Self::Meta) -> GraphProptestResult {
     self.0(graph, meta)
   }
 }
 
 impl GraphProptest for TestWithData<GraphProptestResult> {
   type Meta = ();
-  type SValue = GraphSpec;
+  type SValue = GraphData;
 
   fn constant_meta() -> Option<()> { Some(()) }
 
-  fn split_input(sval: Self::SValue) -> (GraphSpec, Self::Meta) { (sval, ()) }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { (sval, ()) }
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, _: Self::Meta) -> GraphProptestResult {
+  fn run(&self, graph: &mut Graph, data: &GraphData, _: Self::Meta) -> GraphProptestResult {
     self.0(graph, data)
   }
 }
@@ -263,11 +263,11 @@ impl GraphProptest for TestWithData<GraphProptestResult> {
 
 impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest for ComplexTest<GraphProptestResult, M> {
   type Meta = M;
-  type SValue = (GraphSpec, M);
+  type SValue = (GraphData, M);
 
-  fn split_input(sval: Self::SValue) -> (GraphSpec, Self::Meta) { sval }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { sval }
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, meta: Self::Meta) -> GraphProptestResult {
+  fn run(&self, graph: &mut Graph, data: &GraphData, meta: Self::Meta) -> GraphProptestResult {
     self.0(graph, data, meta)
   }
 }
@@ -495,7 +495,7 @@ pub trait GraphTest {
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta);
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, input: Self::Meta) -> GraphTestResult;
+  fn run(&self, graph: &mut Graph, data: &GraphData, input: Self::Meta) -> GraphTestResult;
 }
 
 
@@ -505,7 +505,7 @@ impl GraphTest for SimpleTest<GraphTestResult> {
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
 
-  fn run(&self, graph: &mut Graph, _: &GraphSpec, _: Self::Meta) -> GraphTestResult {
+  fn run(&self, graph: &mut Graph, _: &GraphData, _: Self::Meta) -> GraphTestResult {
     (self.0)(graph)
   }
 }
@@ -516,7 +516,7 @@ impl GraphTest for TestWithData<GraphTestResult> {
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, _: Self::Meta) -> GraphTestResult {
+  fn run(&self, graph: &mut Graph, data: &GraphData, _: Self::Meta) -> GraphTestResult {
     (self.0)(graph, data)
   }
 }
@@ -527,7 +527,7 @@ impl<M: Clone> GraphTest for TestWithMeta<GraphTestResult, M> {
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
 
-  fn run(&self, graph: &mut Graph, _: &GraphSpec, meta: Self::Meta) -> GraphTestResult {
+  fn run(&self, graph: &mut Graph, _: &GraphData, meta: Self::Meta) -> GraphTestResult {
     (self.0)(graph, meta)
   }
 }
@@ -538,7 +538,7 @@ impl<M: Clone> GraphTest for ComplexTest<GraphTestResult, M> {
 
   fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
 
-  fn run(&self, graph: &mut Graph, data: &GraphSpec, meta: Self::Meta) -> GraphTestResult {
+  fn run(&self, graph: &mut Graph, data: &GraphData, meta: Self::Meta) -> GraphTestResult {
     (self.0)(graph, data, meta)
   }
 }
@@ -628,7 +628,7 @@ impl<F: GraphTest> GraphTestRunner<F> {
   {
     let (input_patt, meta) = F::split_meta(input);
     for input in glob_graph_inputs(input_patt).pretty_unwrap() {
-      let data = GraphSpec::load_from_file(&input).unwrap();
+      let data = GraphData::load_from_file(&input).unwrap();
       let mut graph = data.build();
       let result = self.test.run(&mut graph, &data, meta.clone());
       if let Err(ErrorWithGraphContext { error, iis }) = result {
@@ -676,7 +676,7 @@ macro_rules! graph_testcase_assert {
   ($cond:expr, $($arg:tt)+) => {{
     let cond = $cond;
     if !cond {
-      return Err($crate::test_utils::ErrorWithGraphContext::from(anyhow::anyhow!($($arg)*)))
+      return Err($crate::test::ErrorWithGraphContext::from(anyhow::anyhow!($($arg)*)))
     }
   }};
 }

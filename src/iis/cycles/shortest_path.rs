@@ -409,16 +409,16 @@ mod tests {
   #[macro_use]
   use crate::*;
 
-  use crate::test_utils::{*, strategy::SharableStrategy};
+  use crate::test::{*, strategy::SharableStrategy};
   use crate::graph::{ModelState, Graph};
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
-  use crate::test_utils::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
+  use crate::test::strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one};
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
   use crate::viz::LayoutAlgo;
 
   /// Triangular graphs with a single non-zero edge
-  fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+  fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphData> {
     (3..200usize)
       .prop_flat_map(|mut size| {
       // ensure the graph has enough nodes that the last row (highest rank) doesn't
@@ -433,7 +433,7 @@ mod tests {
   }
 
   /// Triangular graphs with a zero edges and a bound infeasible (LB is the top of the triangle, UB is the bottom-right)
-  fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphSpec> {
+  fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphData> {
     (1..=13usize)
       .prop_flat_map(|mut rank| {
       let size = triangular_number(rank) + 1;

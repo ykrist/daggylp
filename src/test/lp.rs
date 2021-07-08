@@ -2,7 +2,7 @@ use crate::graph::{Graph, Weight};
 use grb::prelude::*;
 use crate::map_with_capacity;
 use fnv::FnvHashMap;
-use crate::test_utils::*;
+use crate::test::*;
 use crate::graph::*;
 
 thread_local!{
@@ -21,7 +21,7 @@ pub struct Lp {
 }
 
 impl Lp {
-  pub fn build(graph: &GraphSpec) -> Self {
+  pub fn build(graph: &GraphData) -> Self {
     let mut vars = Vec::with_capacity(graph.nodes.len());
     let mut constr = map_with_capacity(graph.nodes.len());
     let mut model = ENV.with(|env| Model::with_env("graph", env).unwrap());
@@ -88,14 +88,14 @@ mod tests {
   use super::*;
   #[macro_use]
   use crate::*;
-  use crate::test_utils::*;
-  use crate::test_utils::strategy::*;
+  use crate::test::*;
+  use crate::test::strategy::*;
   use crate::graph::*;
   use proptest::prelude::*;
 
   #[graph_test]
   #[input("*.f")]
-  fn compare_feasible(g: &mut Graph, data: &GraphSpec) -> GraphTestResult {
+  fn compare_feasible(g: &mut Graph, data: &GraphData) -> GraphTestResult {
     // Need to set objective values to nonzero so Gurobi will minimise
     let mut data = data.clone();
     for n in data.nodes.iter_mut() {
@@ -121,7 +121,7 @@ mod tests {
   #[graph_proptest]
   #[config(cases=500, cpus=4, layout="fdp")]
   #[input(graph(any_nodes(3..300), any_edge_weight()))]
-  fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphSpec) -> GraphProptestResult {
+  fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphData) -> GraphProptestResult {
     let mut lp = Lp::build(data);
     let s = lp.solve().unwrap();
     match (g.solve(), s) {

@@ -163,10 +163,10 @@ mod tests {
   use super::*;
   #[macro_use]
   use crate::*;
-  use crate::test_utils::*;
+  use crate::test::*;
   use proptest::prelude::*;
   use proptest::test_runner::TestCaseResult;
-  use crate::test_utils::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
+  use crate::test::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
   use crate::viz::GraphViz;
 
   fn path_iis(path: Vec<usize>) -> Iis {
@@ -177,7 +177,7 @@ mod tests {
     Iis { bounds, edges, graph_id: u32::MAX }
   }
 
-  fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphSpec> {
+  fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphData> {
     strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0))
       .prop_map(|mut g| {
         g.nodes.first_mut().unwrap().lb = 1;
@@ -186,7 +186,7 @@ mod tests {
       })
   }
 
-  fn iis_graph() -> impl SharableStrategy<Value=GraphSpec> {
+  fn iis_graph() -> impl SharableStrategy<Value=GraphData> {
     strategy::connected_acyclic_graph(any_bounds_nodes(10..=100), 0..=MAX_EDGE_WEIGHT)
   }
 

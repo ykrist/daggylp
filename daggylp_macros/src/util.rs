@@ -1,4 +1,3 @@
-use crate::*;
 use syn::*;
 use syn::parse::{ParseStream, Parse};
 use quote::{quote, ToTokens};
@@ -44,7 +43,8 @@ map_lit_to_variant!{ layout_algo_variant;
 
 
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub enum TestFnWrapper {
   Simple,
   WithMeta,
@@ -87,7 +87,7 @@ fn check_graphspec_arg(arg: &FnArg) -> bool {
     syn::Type::Path(p) => p,
     _ => return false
   };
-  arg.path.is_ident("GraphSpec")
+  arg.path.is_ident("GraphData")
 }
 
 fn check_meta_arg(arg: &FnArg) -> bool {
@@ -138,7 +138,7 @@ impl TestFnWrapper {
       ))
     };
 
-    let mut inputs: Vec<_> = sig.inputs.iter().collect();
+    let inputs: Vec<_> = sig.inputs.iter().collect();
     if !(1..=3).contains(&inputs.len()) {
       return args_error();
     }
@@ -169,13 +169,13 @@ impl ToTokens for TestFnWrapper {
     use TestFnWrapper::*;
     match self {
       Simple =>
-        tokens.extend(quote! { crate::test_utils::SimpleTest }),
+        tokens.extend(quote! { crate::test::SimpleTest }),
       WithMeta =>
-        tokens.extend(quote! { crate::test_utils::TestWithMeta }),
+        tokens.extend(quote! { crate::test::TestWithMeta }),
       WithData =>
-        tokens.extend(quote! { crate::test_utils::TestWithData }),
-      ComplexTest =>
-        tokens.extend(quote! { crate::test_utils::ComplexTest }),
+        tokens.extend(quote! { crate::test::TestWithData }),
+      Complex =>
+        tokens.extend(quote! { crate::test::ComplexTest }),
     }
   }
 }
@@ -189,7 +189,8 @@ pub trait UpdateFromMeta {
   fn update(&mut self, meta: &Meta) -> Result<bool>;
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub struct VizConfig {
   sccs: Option<TokenStream>,
   layout: Option<TokenStream>,
@@ -233,7 +234,7 @@ impl UpdateFromMeta for VizConfig {
 
 impl_parse_for_updatefrommeta!(VizConfig);
 
-#[derive(Debug)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub struct Test<D, S> {
   pub global_settings: Option<S>,
   pub outer_attrs: Vec<syn::Attribute>,
@@ -248,13 +249,24 @@ impl<D: Directive, S> Test<D, S> {
   pub fn parse(input: ParseStream, expected_output: &str) -> Result<Self> {
     let mut directives = Vec::default();
     let mut outer_attrs: Vec<syn::Attribute> = input.call(syn::Attribute::parse_outer)?;
-    let mut rem_outer_attrs = Vec::default();
-    for attr in outer_attrs {
-      match D::from_attribute(&attr)? {
-        Some(d) => directives.push(d),
-        None => rem_outer_attrs.push(attr),
+    let mut err = Ok(());
+
+    outer_attrs.retain(|attr| {
+      if err.is_err() { return true }
+      match D::from_attribute(attr) {
+        Err(e) => {
+          err = Err(e);
+          true
+        },
+        Ok(Some(d)) => {
+          directives.push(d);
+          false
+        },
+        Ok(None) => true,
       }
-    }
+    });
+
+    err?;
 
     let mut fn_sig: syn::Signature = input.parse()?;
     let fn_body: syn::ExprBlock = input.parse()?;
@@ -267,7 +279,7 @@ impl<D: Directive, S> Test<D, S> {
 
     Ok(Test {
       global_settings: None,
-      outer_attrs: rem_outer_attrs,
+      outer_attrs,
       directives,
       fn_ident,
       fn_wrapper,

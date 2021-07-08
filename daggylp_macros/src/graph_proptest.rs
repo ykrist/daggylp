@@ -2,12 +2,11 @@ use crate::*;
 use proc_macro2::TokenStream;
 use syn::*;
 use syn::parse::{Parse, ParseStream, Parser};
-use syn::punctuated::Punctuated;
 use quote::{ToTokens, quote};
-use std::ops::Deref;
 
 
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Copy, Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub struct GlobalSettings {
   deterministic: bool,
   skip_regressions: bool,
@@ -35,23 +34,10 @@ impl UpdateFromMeta for GlobalSettings {
 }
 
 impl_parse_for_updatefrommeta!(GlobalSettings);
-//
-// impl Parse for GlobalSettings {
-//   fn parse(input: ParseStream) -> Result<Self> {
-//     let meta_list = input.call(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-//     let mut settings = GlobalSettings::default();
-//     for meta in meta_list.iter() {
-//       if settings.update(meta)? {
-//         continue;
-//       }
-//       parse_error!(meta => "unrecognised attribute item")
-//     }
-//     Ok(settings)
-//   }
-// }
-//
 
-#[derive(Default, Debug, Clone)]
+
+#[derive(Default, Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub struct Config {
   viz: VizConfig,
   cpus: Option<LitInt>,
@@ -65,12 +51,6 @@ fn expect_litint(lit: &Lit) -> Result<&LitInt> {
   }
 }
 
-fn expect_litbool(lit: &Lit) -> Result<&LitBool> {
-  match lit {
-    Lit::Bool(l) => Ok(l),
-    _ => parse_error!(lit => "expected integer literal"),
-  }
-}
 
 impl UpdateFromMeta for Config {
   fn update(&mut self, meta: &Meta) -> Result<bool> {
@@ -112,7 +92,8 @@ impl ToTokens for Config {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub enum ProptestDirective {
   Config(Config),
   Input(TokenStream),
@@ -203,8 +184,8 @@ impl ToTokens for GraphProptest {
         #fn_sig
         #fn_body
 
-        let mut runner = crate::test_utils::GraphProptestRunner::new(
-          crate::test_utils::get_test_id(module_path!(), stringify!(#fn_ident)),
+        let mut runner = crate::test::GraphProptestRunner::new(
+          crate::test::get_test_id(module_path!(), stringify!(#fn_ident)),
           #fn_wrapper(#inner_ident)
         );
 

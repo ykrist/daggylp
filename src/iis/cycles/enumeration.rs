@@ -1,6 +1,6 @@
 use super::*;
 use crate::iis::Iis;
-use crate::test_utils::{GraphSpec};
+use crate::test::{GraphData};
 use crate::viz::{GraphViz, LayoutAlgo};
 use proptest::prelude::{TestCaseError, Strategy};
 use proptest::test_runner::{TestCaseResult, TestError};
@@ -328,8 +328,8 @@ impl<E: EdgeLookup> Graph<E> {
 mod tests {
   use super::*;
   use proptest::prelude::*;
-  use crate::test_utils::*;
-  use crate::test_utils::strategy::*;
+  use crate::test::*;
+  use crate::test::strategy::*;
   use crate::*;
 
   fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> GraphProptestResult {

@@ -43,7 +43,7 @@ pub struct SccHandle<'a> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::test_utils::*;
+  use crate::test::*;
   use crate::viz::GraphViz;
   use proptest::prelude::*;
 

@@ -1,20 +1,19 @@
-#[macro_use]
 use crate::*;
-use quote::{ToTokens, TokenStreamExt, quote, quote_spanned};
-use proc_macro2::{TokenStream, Span};
-use syn::parse::{Parse, Parser, Result, ParseStream};
-use syn::punctuated::Punctuated;
+use quote::{ToTokens, quote};
+use proc_macro2::{TokenStream};
+use syn::parse::{Parse, Result, ParseStream};
 use syn::*;
-use std::ops::Deref;
 
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub enum GraphTestDirective {
   Config(VizConfig),
   Input(GraphTestInput),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 pub struct GraphTestInput {
   name: LitStr,
   meta: Option<TokenStream>,
@@ -105,8 +104,8 @@ impl ToTokens for GraphTest {
         #fn_sig
         #fn_body
 
-        let mut runner = crate::test_utils::GraphTestRunner::new(
-          crate::test_utils::get_test_id(module_path!(), stringify!(#fn_ident)),
+        let mut runner = crate::test::GraphTestRunner::new(
+          crate::test::get_test_id(module_path!(), stringify!(#fn_ident)),
           #fn_wrapper(#inner_ident)
         );
 

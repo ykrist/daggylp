@@ -1,3 +1,3 @@
 fn main() -> anyhow::Result<()> {
-  daggylp::test_utils::mark_failed_as_regression()
+  daggylp::test::mark_failed_as_regression()
 }

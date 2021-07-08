@@ -1,7 +1,7 @@
 use dot::*;
 use super::graph::*;
 use std::path::Path;
-use crate::test_utils::{GraphSpec};
+use crate::test::{GraphData};
 use crate::iis::Iis;
 
 #[derive(Debug, Copy, Clone)]
@@ -298,12 +298,12 @@ impl<'a> GraphViz<'a, usize, Edge> for VizGraph<'a> {
 
 #[derive(Copy, Clone, Debug)]
 pub struct VizGraphSpec<'a> {
-  graph: &'a GraphSpec,
+  graph: &'a GraphData,
   config: VizConfig,
 }
 
 
-impl GraphSpec {
+impl GraphData {
   pub(crate) fn viz(&self) -> VizGraphSpec<'_> {
     VizGraphSpec {
       graph: self,
@@ -359,7 +359,7 @@ impl<'a> GraphViz<'a, usize, (usize, usize)> for VizGraphSpec<'a> {
 // #[cfg(test)]
 // mod tests {
   // use super::*;
-  // use crate::test_utils::*;
+  // use crate::test::*;
   //
   // #[test]
   // fn viz() {
