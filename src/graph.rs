@@ -430,10 +430,11 @@ mod tests {
   #[input("k8.f", vec![0; 8])]
   #[input("simple.f", vec![0, 2, 4])]
   #[config(layout="dot")]
-  #[input("multiple-sccs.f", vec![1, 1, 1, 1, 0, 2])]
+  #[input("multiple-sccs.f", vec![0, 0, 7, 2, 2, 2, 2, 6, 6, 6])]
   #[config(sccs="hide")]
-  #[input("simple-cycle.f", vec![0, 0, 7, 2, 2, 2, 2, 6, 6, 6])]
+  #[input("simple-cycle.f", vec![1, 1, 1, 1, 0, 2])]
   fn solve_feasible(g: &mut Graph, solution: Vec<Weight>) -> GraphTestResult {
+    println!("{}", g.nodes.len());
     if matches!(g.solve(), SolveStatus::Infeasible(_)) {
       Err(anyhow::anyhow!("infeasible").iis(g.compute_iis(true)))?
     }

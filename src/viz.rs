@@ -11,6 +11,24 @@ pub enum SccViz {
   Collapse,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum LayoutAlgo {
+  Dot,
+  Neato,
+  Fdp,
+}
+
+impl LayoutAlgo {
+  fn prog_name(&self) -> &'static str {
+    use LayoutAlgo::*;
+    match self {
+      Dot => "dot",
+      Neato => "neato",
+      Fdp => "fdp",
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VizConfig {
   scc: SccViz,
@@ -60,23 +78,19 @@ impl Graph {
 }
 
 
-#[derive(Debug, Copy, Clone)]
-pub enum LayoutAlgo {
-  Dot,
-  Neato,
-  Fdp,
-}
+impl<'a> VizGraph<'a> {
+  pub fn iis(mut self, iis: &'a Iis) -> Self {
+    self.iis = Some(iis);
+    self
+  }
 
-impl LayoutAlgo {
-  fn prog_name(&self) -> &'static str {
-    use LayoutAlgo::*;
-    match self {
-      Dot => "dot",
-      Neato => "neato",
-      Fdp => "fdp",
-    }
+  pub(crate) fn fmt_nodes(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
+    self.var_names = Some(f);
+    self
   }
 }
+
+
 
 pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + Sized
   where
@@ -122,17 +136,6 @@ pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + 
   }
 }
 
-impl<'a> VizGraph<'a> {
-  pub fn iis(mut self, iis: &'a Iis) -> Self {
-    self.iis = Some(iis);
-    self
-  }
-
-  pub(crate) fn fmt_nodes(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
-    self.var_names = Some(f);
-    self
-  }
-}
 
 impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   fn nodes(&'a self) -> Nodes<'a, usize> {

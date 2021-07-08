@@ -116,10 +116,12 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
       // active predecessor or is the root node.
       if j != root && scc.contains(&j) {
         match &mut nodes[j].active_pred {
-          ap @ None => *ap = Some(i),
+          ap @ None => {
+            *ap = Some(i);
+            queue.push_back(j);
+          },
           Some(_) => {}
         }
-        queue.push_back(j);
       }
     }
   }
