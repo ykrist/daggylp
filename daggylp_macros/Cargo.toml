@@ -1,0 +1,13 @@
+[package]
+name = "daggylp_macros"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling = "0.13.0"
+quote = "1.0.9"
+syn = { version = "1.0.73", features = ["parsing", "printing", "proc-macro", "full"]}
+proc-macro2 = "1.0.27"

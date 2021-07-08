@@ -3,4 +3,3 @@ Cargo.lock
 .idea
 gurobi.log
 tests/testcase_failures
-daggylp_macros
