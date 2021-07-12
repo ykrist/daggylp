@@ -140,7 +140,7 @@ impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 // type IndexNiche = UsizeNiche<{usize::MAX}>;
 //
 
-#[cfg(all(test, feature = "test_helpers"))]
+#[cfg(all(test, feature = "test-helpers"))]
 mod test_helpers {
   use crate::test;
   #[test]

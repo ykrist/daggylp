@@ -24,9 +24,4 @@ daggylp_macros = { path = "./daggylp_macros"}
 default = ["viz"]
 viz-extra = ["viz"]
 viz = ["dot"]
-test_helpers = []
-
-#[[bin]]
-#name = "mark-failed-as-regression"
-#path = "src/bin/mark-failed-as-regression.rs"
-#required-features = ["test-tools"]
+test-helpers = []
