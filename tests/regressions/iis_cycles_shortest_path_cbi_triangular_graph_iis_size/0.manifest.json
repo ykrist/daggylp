@@ -1,0 +1,6 @@
+{
+  "meta": "0.meta.input.json",
+  "input": "0.input.txt",
+  "input_graph": "0.input.svg",
+  "output_graph": "0.output.svg"
+}

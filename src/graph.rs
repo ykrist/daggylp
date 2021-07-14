@@ -241,13 +241,6 @@ impl<E: EdgeLookup> Graph<E> {
     }
   }
 
-  pub(crate) fn reset_nodes(&mut self) {
-    for n in self.nodes.iter_mut() {
-      n.x = n.lb;
-      n.active_pred = None;
-    }
-  }
-
 
   fn update(&mut self) {
     if let ModelState::Dirty { rebuild_sccs } = &self.state {
@@ -274,17 +267,14 @@ impl<E: EdgeLookup> Graph<E> {
 
 
   pub fn remove_iis(&mut self, iis: &Iis) {
-    self.mark_dirty_batch(iis.edges.iter().copied());
-    self.edges.mark_for_removal_batch(Cow::Borrowed(&iis.edges))
-  }
-
-  pub fn remove_iis_owned(&mut self, iis: Iis) {
-    self.mark_dirty_batch(iis.edges.iter().copied());
-    self.edges.mark_for_removal_batch(Cow::Owned(iis.edges));
+    self.check_rebuild_sccs_batch(iis.iter_edges());
+    for (from, to) in iis.iter_edges() {
+      self.edges.mark_for_removal(from, to)
+    }
   }
 
   pub(crate) fn remove_edge(&mut self, from: NodeIdx, to: NodeIdx) {
-    self.mark_dirty(from, to);
+    self.check_rebuild_sccs(from, to);
     self.edges.mark_for_removal(from, to);
   }
 
@@ -292,15 +282,7 @@ impl<E: EdgeLookup> Graph<E> {
     self.remove_edge(from.node, to.node)
   }
 
-  fn mark_dirty_batch(&mut self, edges: impl Iterator<Item=(NodeIdx, NodeIdx)>) {
-    for (from, to) in edges {
-      if self.mark_dirty(from, to) {
-        break;
-      }
-    }
-  }
-
-  fn mark_dirty(&mut self, from: NodeIdx, to: NodeIdx) -> bool {
+  fn check_rebuild_sccs(&mut self, from: NodeIdx, to: NodeIdx) -> bool {
     if let ModelState::Dirty { rebuild_sccs } = &self.state {
       if *rebuild_sccs {
         return true;
@@ -314,6 +296,15 @@ impl<E: EdgeLookup> Graph<E> {
     };
     self.state = ModelState::Dirty { rebuild_sccs };
     rebuild_sccs
+  }
+
+
+  fn check_rebuild_sccs_batch(&mut self, edges: impl Iterator<Item=(NodeIdx, NodeIdx)>) {
+    for (from, to) in edges {
+      if self.check_rebuild_sccs(from, to) {
+        break;
+      }
+    }
   }
 
   pub fn solve(&mut self) -> SolveStatus {
@@ -358,21 +349,6 @@ impl<E: EdgeLookup> Graph<E> {
     Ok(obj)
   }
 
-  // #[cfg(feature = "debug")]
-  // pub fn set_var_names(&mut self, f: impl Fn(Var) -> String) {
-  //   self.viz_data.var_names = Some(Box::new(f));
-  // }
-  //
-  // #[cfg(not(feature = "debug"))]
-  // pub fn set_var_names(&mut self, f: impl Fn(Var) -> String) {
-  //   eprintln!("warning: var names are ignored if the `debug` feature is not selected.")
-  // }
-  //
-  // pub fn clear_var_names(&mut self) {
-  //   #[cfg(feature = "debug")] {
-  //     self.viz_data.var_names = None;
-  //   }
-  // }
 
   fn forward_label<'b>(&'b mut self) -> Option<ModelState> {
     let mut queue = vec![];

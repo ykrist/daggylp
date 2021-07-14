@@ -80,16 +80,6 @@ pub trait EdgeLookup: Clone + Neighbours<ForwardDir> + Neighbours<BackwardDir> {
   /// remove edges lazily, e.g. via an internal queue.
   fn mark_for_removal(&mut self, from: usize, to: usize);
 
-  /// Remove a set of edges.  The default implementation calls [`EdgeLookup::mark_for_removal`] for every
-  /// element in the set. If [`EdgeLookup::mark_for_removal_batch`] is called, [`EdgeLookup::remove_update`]
-  /// is guaranteed  to be called *before* the lookup is used for queries.  This allows the lookup to
-  /// remove edges lazily, e.g. via an internal queue.
-  fn mark_for_removal_batch(&mut self, edges: Cow<FnvHashSet<(usize, usize)>>) {
-    for &(from, to) in edges.iter() {
-      self.mark_for_removal(from, to)
-    }
-  }
-
   fn add_new_component(&mut self, num_nodes: usize, edges: FnvHashMap<(usize, usize), Edge>);
 
   fn find_edge(&self, from: usize, to: usize) -> &Edge;
@@ -207,21 +197,6 @@ impl<V: EdgeList<Edge>> EdgeLookup for AdjacencyList<V> {
       }
     }
     self.edge_removal_queue.clear();
-  }
-
-  fn mark_for_removal_batch(&mut self, edges: Cow<FnvHashSet<(usize, usize)>>) {
-    if self.edge_removal_queue.capacity() == 0 {
-      match edges {
-        Cow::Owned(edges) => {
-          self.edge_removal_queue = edges;
-        }
-        Cow::Borrowed(edges) => {
-          self.edge_removal_queue = edges.clone();
-        }
-      }
-    } else {
-      self.edge_removal_queue.extend(edges.iter())
-    }
   }
 
   fn mark_for_removal(&mut self, from: usize, to: usize) {

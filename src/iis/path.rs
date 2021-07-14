@@ -112,9 +112,8 @@ impl<E: EdgeLookup> Graph<E> {
     let (n_edges, initial_state) = shortest_path_initial_state.unwrap();
     let shortest_path = DpShortestPath::new(&cache, initial_state, n_edges);
     let n_edges = n_edges as usize;
-    let mut iis = Iis::with_capacity(self, n_edges);
-    iis.add_backwards_path(shortest_path, true);
-    debug_assert_eq!(iis.edges.len(), n_edges);
+    let mut iis = Iis::from_backwards_path(self, shortest_path);
+    debug_assert_eq!(iis.len(), n_edges + 2);
     iis
   }
 
@@ -170,10 +169,7 @@ mod tests {
 
   fn path_iis(path: Vec<usize>) -> Iis {
     let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
-    let edges: FnvHashSet<_> = path.windows(2)
-      .map(|w| (w[0], w[1]))
-      .collect();
-    Iis { bounds, edges, graph_id: u32::MAX }
+    Iis { kind: InfKind::Path, bounds, edge_nodes: path, graph_id: u32::MAX }
   }
 
   fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphData> {
@@ -196,7 +192,7 @@ mod tests {
     prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path));
     let iis = g.compute_iis(true);
     let iis_size = iis.len();
-    g.remove_iis_owned(iis);
+    g.remove_iis(&iis);
     let status = g.solve();
     match status {
       SolveStatus::Infeasible(InfKind::Path) => {
@@ -228,10 +224,10 @@ mod tests {
     prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
     prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
     let iis = g.compute_iis(true);
-    prop_assert!(iis.edges.len() < g.nodes.len());
-
+    prop_assert!(iis.edge_nodes.len() < g.nodes.len());
+    prop_assert_matches!(iis.kind, InfKind::Path);
     let mut edge_sum: Weight = 0;
-    for &(i, j) in &iis.edges {
+    for (i, j) in iis.iter_edges() {
       edge_sum += g.edges.find_edge(i, j).weight;
     }
 
@@ -253,7 +249,7 @@ mod tests {
       SolveStatus::Infeasible(InfKind::Path) => {
         let iis = g.compute_iis(true);
         graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
-        graph_testcase_assert_eq!(true_iis.edges, iis.edges);
+        graph_testcase_assert_eq!(true_iis.edge_nodes, iis.edge_nodes);
       }
       status => {
         Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?

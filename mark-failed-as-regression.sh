@@ -4,4 +4,4 @@ if [[ ! -e ./Cargo.toml ]] ; then
     exit 1
 fi
 
-cargo ltest -q --lib test_helpers::mark_failed_as_regression --features test_helpers -- --nocapture && rm tests/failures/*
+cargo ltest -q --lib test_helpers::mark_failed_as_regression --features test-helpers -- --nocapture && rm tests/failures/*

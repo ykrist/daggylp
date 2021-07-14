@@ -2,114 +2,113 @@ use crate::set_with_capacity;
 use crate::graph::*;
 use fnv::FnvHashSet;
 use crate::model_states::ModelAction;
+use crate::graph::SolveStatus::Infeasible;
 
 mod cycles;
 mod path;
 
 
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Iis {
   graph_id: u32,
+  kind: InfKind,
   /// If the IIS contains bounds, then (lb_node, ub_node)
-  pub(crate) bounds: Option<(usize, usize)>,
-  /// Edge constraints
-  pub(crate) edges: FnvHashSet<(usize, usize)>,
+  bounds: Option<(usize, usize)>,
+  /// Path/cycle.  If kind is `InfKind::Cycle`, first location should be the same as the last location.
+  edge_nodes: Vec<usize>,
 }
+
 
 impl GraphId for Iis {
   fn graph_id(&self) -> u32 { self.graph_id }
 }
 
 impl Iis {
-  pub(crate) fn clear(&mut self) {
-    self.edges.clear();
-    self.bounds = None;
-  }
-
-  pub(crate) fn with_capacity<E>(graph: &Graph<E>, n_edges: usize) -> Self {
-    Iis { edges: set_with_capacity(n_edges), bounds: None, graph_id: graph.graph_id() }
-  }
-
-  /// First variable should **NOT** be the same as the last
+  /// Construct a pure cycle or cycle-bound IIS
+  ///
+  /// First node should **NOT** be the same as the last
   /// Takes an iterator of nodes `a , b , c , ... ,y, z` and adds the edges
   ///
   ///  `(a -> b), (b -> c) ,...,(y -> z), (z -> a)`
-  pub(crate) fn from_cycle<E>(graph: &Graph<E>, nodes: impl IntoIterator<Item=usize>) -> Self {
-    let mut vars = nodes.into_iter();
-    let mut edges = set_with_capacity(vars.size_hint().0);
-    let first: usize = vars.next().unwrap();
-    let mut i = first;
-    for j in vars {
-      edges.insert((i, j));
-      i = j;
-    }
-    edges.insert((i, first));
-    Iis { edges, bounds: None, graph_id: graph.graph_id() }
+  pub(crate) fn from_cycle<E>(graph: &Graph<E>, bounds: Option<(usize, usize)>, nodes: impl IntoIterator<Item=usize>) -> Self {
+    let mut nodes = nodes.into_iter();
+    let mut edge_nodes = Vec::with_capacity(nodes.size_hint().0 + 1);
+    let first: usize = nodes.next().unwrap();
+    edge_nodes.push(first);
+    edge_nodes.extend(nodes);
+    edge_nodes.push(first);
+    Iis { kind: InfKind::Cycle, edge_nodes, bounds, graph_id: graph.graph_id() }
   }
 
-  /// First variable should **NOT** be the same as the last
-  /// Takes an iterator of nodes `a , b , c , ... ,y,  z` and adds the edges
+  /// Construct a pure cycle IIS
+  ///
+  /// First node should **NOT** be the same as the last
+  /// Takes an iterator of nodes `a , b , c , ... ,y, z` and adds the edges
   ///
   ///  `(a <- b), (b <- c) ,...,(y <- z), (z <- a)`
-  pub(crate) fn from_cycle_backwards<E>(graph: &Graph<E>, nodes: impl IntoIterator<Item=usize>) -> Self {
-    let mut vars = nodes.into_iter();
-    let mut edges = set_with_capacity(vars.size_hint().0);
-    let last: usize = vars.next().unwrap();
-    let mut j = last;
-    for i in vars {
-      edges.insert((i, j));
-      j = i;
-    }
-    edges.insert((last, j));
-    Iis { edges, bounds: None, graph_id: graph.graph_id() }
+  pub(crate) fn from_backwards_cycle<E>(graph: &Graph<E>,
+                                        // bounds: Option<(usize, usize)>,
+                                        nodes: impl IntoIterator<Item=usize>) -> Self {
+    let mut nodes = nodes.into_iter();
+    let mut edge_nodes = Vec::with_capacity(nodes.size_hint().0 + 1);
+    let first: usize = nodes.next().unwrap();
+    edge_nodes.push(first);
+    edge_nodes.extend(nodes);
+    edge_nodes.push(first);
+    edge_nodes.reverse();
+    Iis { kind: InfKind::Cycle, edge_nodes, bounds: None, graph_id: graph.graph_id() }
   }
 
-
-  /// Takes an iterator of nodes `a , b , c , ... ,y , z` and adds the edges
-  ///  `(a -> b), (b -> c) ,..., (y -> z)`
+  /// Construct a Cycle-Bound IIS
   ///
-  /// If `bounds` is `true`, add the lower bound of `a` and upper bound of `z` end to the IIS.
-  pub(crate) fn add_forwards_path(&mut self, nodes: impl IntoIterator<Item=usize>, bounds: bool) {
-    let mut vars = nodes.into_iter();
-    self.edges.reserve(vars.size_hint().0);
-    let mut i: usize = vars.next().unwrap();
-    let first = i;
-    for j in vars {
-      let is_new = self.edges.insert((i, j));
-      debug_assert!(is_new);
-      i = j;
-    }
-    if bounds {
-      self.add_bounds(first, i);
-    }
+  /// Takes two iterators.
+  /// `backwards_path` is iterator of nodes `a , b , c , ... ,y , z` and representing the edges
+  /// `(a <- b), (b <- c) ,..., (y <- z)`
+  /// where `a` is the UB violated node and `z` is the LB violated node.
+  ///
+  /// `forwards_path` is iterator of nodes `a , b , c , ... ,y , z` and representing the edges
+  /// `(a -> b), (b -> c) ,..., (y -> z)`
+  /// where `a` is the UB violated node and `z` is the LB violated node.
+  ///
+  pub(crate) fn from_cycle_path_pair<E>(graph: &Graph<E>,
+                                        backwards_path: impl IntoIterator<Item=usize>,
+                                        forwards_path: impl IntoIterator<Item=usize>) -> Self {
+    let mut backwards_path = backwards_path.into_iter();
+    let mut forwards_path = forwards_path.into_iter();
+
+    let mut edge_nodes = Vec::with_capacity(backwards_path.size_hint().0 + forwards_path.size_hint().0 - 1);
+
+    edge_nodes.extend(backwards_path);
+    // edge_nodes = a <- ... <- z
+    let ub_node = *edge_nodes.first().unwrap();
+    let lb_node = *edge_nodes.last().unwrap();
+    edge_nodes.reverse();
+    // edge_nodes = z -> .... -> a
+    edge_nodes.extend(forwards_path.skip(1)); // need to skip duplicate of `a`
+    // edge_nodes = z -> .... -> a -> ... -> z
+
+    Iis { kind: InfKind::Cycle, edge_nodes, bounds: Some((lb_node, ub_node)), graph_id: graph.graph_id() }
   }
 
+
+  /// Construct a path IIS
+  ///
   /// Takes an iterator of nodes `a , b , c , ... ,y , z` and adds the edges
   ///  `(a <- b), (b <- c) ,..., (y <- z)`
   ///
-  /// If `bounds` is `true`, add the lower bound of `z` and upper bound of `a` end to the IIS.
-  pub(crate) fn add_backwards_path(&mut self, nodes: impl IntoIterator<Item=usize>, bounds: bool) {
-    let mut vars = nodes.into_iter();
-    self.edges.reserve(vars.size_hint().0);
-    let mut j: usize = vars.next().unwrap();
-    let last = j;
-    for i in vars {
-      let is_new = self.edges.insert((i, j));
-      debug_assert!(is_new);
-      j = i;
-    }
-    if bounds {
-      self.add_bounds(j, last);
-    }
-  }
-
-  pub(crate) fn add_bounds(&mut self, lb_node: usize, ub_node: usize) {
-    debug_assert_eq!(self.bounds, None);
-    self.bounds = Some((lb_node, ub_node))
+  /// Where `a` is the UB node and `z` is the LB node.
+  pub(crate) fn from_backwards_path<E>(graph: &Graph<E>, nodes: impl IntoIterator<Item=usize>) -> Self {
+    let mut edge_nodes: Vec<_> = nodes.into_iter().collect();
+    // edge_nodes = a <- ... <- z
+    let ub_node = *edge_nodes.first().unwrap();
+    let lb_node = *edge_nodes.last().unwrap();
+    edge_nodes.reverse();
+    // edge_nodes = z -> .... -> a
+    Iis { kind: InfKind::Path, edge_nodes, bounds: Some((lb_node, ub_node)), graph_id: graph.graph_id() }
   }
 
   pub fn len(&self) -> usize {
-    self.edges.len() + if self.bounds.is_some() { 2 } else { 0 }
+    self.edge_nodes.len() - 1 + if self.bounds.is_some() { 2 } else { 0 }
   }
 
   pub fn bounds(&self) -> Option<(Var, Var)> {
@@ -126,15 +125,32 @@ impl Iis {
     bounds.into_iter().flat_map(crate::ArrayIntoIter::new)
   }
 
+  pub(crate) fn iter_edges<'a>(&'a self) -> impl Iterator<Item=(usize, usize)> + 'a {
+    self.edge_nodes.windows(2).map(|pair| (pair[0], pair[1]))
+  }
+
   pub fn iter_edge_constraints<'a>(&'a self) -> impl Iterator<Item=(Var, Var)> + 'a {
-    self.edges.iter()
-      .map(move |&(i, j)| (self.var_from_node_id(i), self.var_from_node_id(j))
+    self.iter_edges()
+      .map(move |(i, j)| (self.var_from_node_id(i), self.var_from_node_id(j))
       )
   }
 
-  pub fn iter_constraints<'a>(&'a self) -> impl Iterator<Item=Constraint> + 'a {
-    self.iter_bounds().chain(self.iter_edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj)))
+  pub fn iter_edge_vars<'a>(&'a self) -> impl Iterator<Item=Var> + 'a {
+    let nodes = match self.kind {
+      InfKind::Path => self.edge_nodes.as_slice(),
+      InfKind::Cycle => &self.edge_nodes[..self.edge_nodes.len()],
+    };
+    nodes.iter().copied().map(move |n| self.var_from_node_id(n))
   }
+
+  pub fn iter_constraints<'a>(&'a self) -> impl Iterator<Item=Constraint> + 'a {
+    self.iter_bounds()
+      .chain(
+      self.iter_edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj))
+      )
+  }
+
+
 }
 
 impl<E: EdgeLookup> Graph<E> {

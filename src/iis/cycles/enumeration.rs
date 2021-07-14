@@ -221,14 +221,13 @@ impl<'a, I, E> Iterator for CyclicIisIter<'a, I, E>
         None => continue,
         Some(kind) => {
           // println!("inf: {:?}", &cycle);
-          let mut iis = Iis::from_cycle(self.graph, cycle.iter().copied());
-          match kind {
-            CyclicInfKind::Pure => {}
-            CyclicInfKind::Bounds(bi) => {
-              iis.add_bounds(bi.lb_node, bi.ub_node);
-            }
+          let bounds = match kind {
+            CyclicInfKind::Pure => None,
+            CyclicInfKind::Bounds(bi) => Some((bi.lb_node, bi.ub_node)),
             CyclicInfKind::Unknown => unreachable!(),
-          }
+          };
+          let mut iis = Iis::from_cycle(self.graph, bounds, cycle.iter().copied());
+
           if self.one_iis_per_scc {
             self.cycle_iter.next_scc()
           }

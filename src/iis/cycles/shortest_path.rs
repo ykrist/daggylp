@@ -314,15 +314,11 @@ impl<E: EdgeLookup> Graph<E> {
 
           if let Some(p) = p {
             let num_path_edges = p.num_edges(e.from);
-            let iis = smallest_iis.get_or_insert_with(|| Iis::with_capacity(self, num_path_edges + 1));
-            iis.clear();
-            iis.edges.insert((e.from, e.to));
-            iis.add_backwards_path(p.iter_nodes(e.from), false);
+            smallest_iis = Some(Iis::from_backwards_cycle(self, p.iter_nodes(e.from)));
             if !smallest {
               return smallest_iis;
-            } else {
-              path_prune.update_bound(|_| num_path_edges as u32)
             }
+            path_prune.update_bound(|_| num_path_edges as u32);
           }
         }
       }
@@ -340,13 +336,9 @@ impl<E: EdgeLookup> Graph<E> {
       let p2 = self.shortest_path_scc::<BackwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
 
       let n_edges = p1.num_edges(dest) + p2.num_edges(dest);
-      let mut iis = Iis::with_capacity(self, n_edges);
 
-      // p1.iter_nodes(): ub_node <- ... <- lb_node
-      iis.add_backwards_path(p1.iter_nodes(dest), true);
-      // p2.iter_nodes(): ub_node -> ... -> lb_node
-      iis.add_forwards_path(p2.iter_nodes(dest), false);
-      debug_assert_eq!(iis.edges.len(), n_edges);
+      let mut iis = Iis::from_cycle_path_pair(self, p1.iter_nodes(dest), p2.iter_nodes(dest));
+      debug_assert_eq!(iis.len(), n_edges + 2);
       iis
     })
   }
@@ -384,17 +376,15 @@ impl<E: EdgeLookup> Graph<E> {
             .min_by_key(|&dst| paths_there.num_edges(dst) + paths_back.num_edges(dst))
             .unwrap();
 
-          // dst <- i1 ... ik <- src
+          // dst(ub) <- i1 ... ik <- src(lb)
           let p1 = paths_there.iter_nodes(best_dest);
-          // dst -> j1 ... jk -> src
+          // dst(ub) -> j1 ... jk -> src(lb)
           let p2 = paths_back.iter_nodes(best_dest);
           let n_edges = p2.size_hint().0 + p1.size_hint().0 - 2; /* - 1 - 1 (bounds)  */
-          let iis = best_iis.get_or_insert_with(|| Iis::with_capacity(self, n_edges));
-          iis.clear();
-          iis.add_backwards_path(p1, true);
-          iis.add_forwards_path(p2, false);
-          debug_assert_eq!(n_edges, iis.edges.len());
+          let iis = Iis::from_cycle_path_pair(self, p1, p2);
+          debug_assert_eq!(n_edges, iis.edge_nodes.len() - 1);
           global_path_prune.update_bound(|_| iis.len() as u32 - 2);
+          best_iis = Some(iis);
         }
       }
 
