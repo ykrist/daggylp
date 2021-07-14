@@ -4,7 +4,7 @@ use crate::edge_storage::{ForwardDir, Neighbours};
 
 pub enum Enumeration {}
 
-impl FindCyclicIis<Enumeration> for Graph {
+impl<E: EdgeLookup> FindCyclicIis<Enumeration> for Graph<E> {
   fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
     self.iter_cyclic_iis(sccs.iter()).next().unwrap()
   }

@@ -136,7 +136,7 @@ pub struct AdjacencyList<V> {
 }
 
 
-impl<V: EdgeStorage<Edge>> Neighbours<ForwardDir> for AdjacencyList<V> {
+impl<V: EdgeList<Edge>> Neighbours<ForwardDir> for AdjacencyList<V> {
   type Neigh<'a> = std::slice::Iter<'a, Edge>;
 
   fn neighbours(&self, node: usize) -> Self::Neigh<'_> {
@@ -144,7 +144,7 @@ impl<V: EdgeStorage<Edge>> Neighbours<ForwardDir> for AdjacencyList<V> {
   }
 }
 
-impl<V: EdgeStorage<Edge>> Neighbours<BackwardDir> for AdjacencyList<V> {
+impl<V: EdgeList<Edge>> Neighbours<BackwardDir> for AdjacencyList<V> {
   type Neigh<'a> = std::slice::Iter<'a, Edge>;
 
   fn neighbours(&self, node: usize) -> Self::Neigh<'_> {
@@ -152,7 +152,7 @@ impl<V: EdgeStorage<Edge>> Neighbours<BackwardDir> for AdjacencyList<V> {
   }
 }
 
-impl<V: EdgeStorage<Edge>> BuildEdgeStorage for AdjacencyList<V> {
+impl<V: EdgeList<Edge>> BuildEdgeStorage for AdjacencyList<V> {
   type Finish = Self;
 
   fn new(num_nodes: usize) -> Self {
@@ -177,7 +177,7 @@ type CsrAllEdges<'a, V> = iter::FlatMap<
   fn(&'a V) -> &'a [Edge]
 >;
 
-impl<V: EdgeStorage<Edge>> EdgeLookup for AdjacencyList<V> {
+impl<V: EdgeList<Edge>> EdgeLookup for AdjacencyList<V> {
   type Builder = Self;
   type AllEdges<'a> = CsrAllEdges<'a, V>;
 
@@ -250,14 +250,14 @@ impl<V: EdgeStorage<Edge>> EdgeLookup for AdjacencyList<V> {
   }
 }
 
-pub trait EdgeStorage<T>: Deref<Target=[T]> + Clone + Default + 'static
+pub trait EdgeList<T>: Deref<Target=[T]> + Clone + Default + 'static
 {
   fn push(&mut self, item: T);
 
   fn retain(&mut self, f: impl FnMut(&T) -> bool);
 }
 
-impl<T: 'static + Clone> EdgeStorage<T> for Vec<T> {
+impl<T: 'static + Clone> EdgeList<T> for Vec<T> {
   fn push(&mut self, item: T) {
     Vec::push(self, item);
   }
@@ -272,7 +272,7 @@ mod smallvec_support {
   use super::*;
   use smallvec::SmallVec;
 
-  impl<T: 'static + Clone, const N: usize> EdgeStorage<T> for SmallVec<[T; N]> {
+  impl<T: 'static + Clone, const N: usize> EdgeList<T> for SmallVec<[T; N]> {
     fn push(&mut self, item: T) {
       SmallVec::push(self, item);
     }
@@ -282,13 +282,15 @@ mod smallvec_support {
     }
   }
 }
+#[cfg(feature = "smallvec")]
+pub type SmallVec<const N: usize> = smallvec::Smallvec<[Edge; N]>;
 
 #[cfg(feature = "arrayvec")]
 mod arrayvec_support {
   use super::*;
   use arrayvec::ArrayVec;
 
-  impl<T: 'static + Clone, const N: usize> EdgeStorage<T> for ArrayVec<T, N> {
+  impl<T: 'static + Clone, const N: usize> EdgeList<T> for ArrayVec<T, N> {
     fn push(&mut self, item: T) {
       ArrayVec::push(self, item);
     }
@@ -298,7 +300,8 @@ mod arrayvec_support {
     }
   }
 }
-
+#[cfg(feature = "arrayvec")]
+pub type ArrayVec<const N: usize> = arrayvec::ArrayVec<Edge, N>;
 
 mod csr_alist {
   use super::*;

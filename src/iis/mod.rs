@@ -112,6 +112,12 @@ impl Iis {
     self.edges.len() + if self.bounds.is_some() { 2 } else { 0 }
   }
 
+  pub fn bounds(&self) -> Option<(Var, Var)> {
+    self.bounds.map(|(lb, ub)| {
+      (self.var_from_node_id(lb), self.var_from_node_id(ub))
+    })
+  }
+
   pub fn iter_bounds<'a>(&'a self) -> impl Iterator<Item=Constraint> + 'a {
     let bounds = self.bounds.map(|(lb, ub)| [
       Constraint::Lb(self.var_from_node_id(lb)),
@@ -131,7 +137,7 @@ impl Iis {
   }
 }
 
-impl Graph {
+impl<E: EdgeLookup> Graph<E> {
   pub fn compute_iis(&mut self, minimal: bool) -> Iis {
     self.check_allowed_action(ModelAction::ComputeIis).unwrap();
     let iis = match &self.state {

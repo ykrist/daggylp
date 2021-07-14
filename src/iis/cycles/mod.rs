@@ -25,7 +25,7 @@ trait FindCyclicIis<A> {
   fn find_smallest_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis;
 }
 
-impl Graph {
+impl<E: EdgeLookup> Graph<E> {
   pub(crate) fn compute_cyclic_iis(&self, minimal: bool, sccs: &[FnvHashSet<usize>]) -> Iis {
     // use shortest_path::ShortestPath;
     if minimal {

@@ -2,6 +2,9 @@
 #![feature(option_result_unwrap_unchecked)]
 #![allow(warnings)]
 mod graph;
+
+pub use graph::{Var, Constraint, Graph, SolveStatus, Weight, InfKind};
+
 mod mrs;
 #[cfg(any(test, feature = "viz"))]
 mod viz;

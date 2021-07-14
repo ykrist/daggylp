@@ -35,6 +35,7 @@ enum DpValueAction {
 }
 
 use DpValueAction::*;
+use crate::edge_storage::EdgeList;
 
 //      val            i     edge weight (i, j)
 ///                          j    deadline[j]
@@ -79,7 +80,7 @@ impl Iterator for DpShortestPath<'_> {
   }
 }
 
-impl Graph {
+impl<E: EdgeLookup> Graph<E> {
   pub(crate) fn compute_path_iis(&self, violated_ubs: &[usize]) -> Iis {
     let mut cache = map_with_capacity(64);
     let mut shortest_path_initial_state = None;

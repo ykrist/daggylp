@@ -4,6 +4,37 @@ use crate::edge_storage::{ForwardDir, BackwardDir, EdgeDir};
 
 pub enum ShortestPathAlg {}
 
+impl<E: EdgeLookup> FindCyclicIis<ShortestPathAlg> for Graph<E> {
+  fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
+    for scc in sccs { // start from first SCC index found in ModelState
+      let iis = self.find_cycle_edge_iis(scc, false, None)
+        .or_else(|| self.find_cycle_bound_iis(scc));
+      if let Some(iis) = iis {
+        return iis;
+      }
+    }
+    unreachable!();
+  }
+
+  fn find_smallest_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
+    let mut smallest_iis_size = None;
+    let mut best_iis = None;
+
+    for scc in sccs {
+      if let Some(iis) = self.find_cycle_edge_iis(scc, true, smallest_iis_size) {
+        smallest_iis_size = Some(iis.len() as u32);
+        best_iis = Some(iis);
+      }
+      if let Some(iis) = self.find_smallest_cycle_bound_iis(scc, smallest_iis_size) {
+        smallest_iis_size = Some(iis.len() as u32);
+        best_iis = Some(iis);
+      }
+    }
+
+    best_iis.unwrap()
+  }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum Prune {
   // No pruning
@@ -177,37 +208,6 @@ impl<D> Iterator for ShortestPath<'_, D> {
 
 impl<D> ExactSizeIterator for ShortestPath<'_, D> {}
 
-
-impl FindCyclicIis<ShortestPathAlg> for Graph {
-  fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    for scc in sccs { // start from first SCC index found in ModelState
-      let iis = self.find_cycle_edge_iis(scc, false, None)
-        .or_else(|| self.find_cycle_bound_iis(scc));
-      if let Some(iis) = iis {
-        return iis;
-      }
-    }
-    unreachable!();
-  }
-
-  fn find_smallest_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    let mut smallest_iis_size = None;
-    let mut best_iis = None;
-
-    for scc in sccs {
-      if let Some(iis) = self.find_cycle_edge_iis(scc, true, smallest_iis_size) {
-        smallest_iis_size = Some(iis.len() as u32);
-        best_iis = Some(iis);
-      }
-      if let Some(iis) = self.find_smallest_cycle_bound_iis(scc, smallest_iis_size) {
-        smallest_iis_size = Some(iis.len() as u32);
-        best_iis = Some(iis);
-      }
-    }
-
-    best_iis.unwrap()
-  }
-}
 
 impl<E: EdgeLookup> Graph<E> {
   /// Computes the shortest path from `src` to one or more `dests`.
