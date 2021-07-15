@@ -31,7 +31,7 @@ impl GraphId for MrsTree {
 }
 
 impl MrsTree {
-  fn build(graph: &Graph, in_mrs: &[bool], root: usize) -> Self {
+  fn build<E: EdgeLookup>(graph: &Graph<E>, in_mrs: &[bool], root: usize) -> Self {
     let r = &graph.nodes[root];
 
     let mut nodes = vec![MrsTreeNode {
@@ -51,7 +51,7 @@ impl MrsTree {
     tree
   }
 
-  fn build_recursive(&mut self, graph: &Graph, in_mrs: &[bool], idx_of_root: usize) {
+  fn build_recursive<E: EdgeLookup>(&mut self, graph: &Graph<E>, in_mrs: &[bool], idx_of_root: usize) {
     let root = self.nodes[idx_of_root].node;
     debug_assert_eq!(self.nodes[idx_of_root].node, root);
     let root_children_start = self.nodes.len();
@@ -84,16 +84,29 @@ impl MrsTree {
     self.nodes[idx_of_root].subtree_end = self.nodes.len();
   }
 
+  /// Return the variable at the root of the MRS, i.e. the variable whose lower bounds is in the MRS
+  pub fn root(&self) -> Var {
+    self.var_from_node_id(self.nodes[0].node)
+  }
+
+  /// Iterate over the variables in this MRS
   pub fn vars(&self) -> impl Iterator<Item=Var> + '_ {
     self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
   }
 
+  /// Iterate over the variables in this MRS whose objectives are non-zero
+  pub fn obj_vars(&self) -> impl Iterator<Item=Var> + '_ {
+    self.nodes.iter().filter(|n| n.obj != 0).map(move |n| self.var_from_node_id(n.node))
+  }
+
+  /// Iterate over the edge constraints in the MRS
   pub fn edge_constraints(&self) -> impl Iterator<Item=(Var, Var)> + '_ {
     self.nodes.iter().skip(1).map(move |n| { // first node is root node
       (self.var_from_node_id(self.nodes[n.parent_idx].node), self.var_from_node_id(n.node))
     })
   }
 
+  /// Iterate over the edge constraints in the MRS, as Constraint objects.
   pub fn constraints(&self) -> impl Iterator<Item=Constraint> + '_ {
     std::iter::once(Constraint::Lb(self.var_from_node_id(self.nodes[0].node)))
       .chain(self.edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj)))
@@ -132,8 +145,13 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
   }
 }
 
-impl Graph {
-  /// For each edge in the tree, how much would the objective change if we removed that edge from the MRS?
+impl<E: EdgeLookup> Graph<E> {
+  /// Returns the objective contribution of the tree, and for each edge constraint in the tree, returns:
+  /// 1. The edge (v1, v2)
+  /// 2. The total subtree objective of the subtree rooted at v2, assuming all constraints in the MRS hold.
+  /// 3. The total subtree objective of the subtree rooted at v2, once edge (v1, v2) is removed,
+  ///    and all other constraints in the MRS hold.
+  ///
   /// Does *NOT* account for constraints which are not in the MRS.
   pub fn edge_sensitivity_analysis(&self, mrs: &MrsTree) -> (Weight, Vec<((Var, Var), Weight, Weight)>) {
     // optimal solution for whole tree
