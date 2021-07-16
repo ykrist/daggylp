@@ -447,7 +447,6 @@ mod tests {
   #[config(sccs="hide")]
   #[input("simple-cycle.f", vec![1, 1, 1, 1, 0, 2])]
   fn solve_feasible(g: &mut Graph, solution: Vec<Weight>) -> GraphTestResult {
-    println!("{}", g.nodes.len());
     if matches!(g.solve(), SolveStatus::Infeasible(_)) {
       g.compute_iis(true);
       anyhow::bail!("infeasible")

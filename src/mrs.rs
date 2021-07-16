@@ -58,7 +58,6 @@ impl MrsTree {
     for e in graph.edges.successors(root) {
       if matches!(&e.kind, &EdgeKind::Regular) && in_mrs[e.to] && graph.nodes[e.to].active_pred == Some(root) {
         let child = &graph.nodes[e.to];
-        println!("push node {}", e.to);
         self.nodes.push(MrsTreeNode {
           node: e.to,
           parent_idx: idx_of_root,
@@ -76,11 +75,9 @@ impl MrsTree {
     let root_children_end = self.nodes.len();
     self.nodes[idx_of_root].children_start = root_children_start;
     self.nodes[idx_of_root].children_end = root_children_end;
-    println!("set children of node {}: {:?}", root, self.nodes[root_children_start..root_children_end].iter().map(|n| n.node).collect::<Vec<_>>());
     for child in root_children_start..root_children_end {
       self.build_recursive(graph, in_mrs, child)
     }
-    println!("set subtree of node {}: {:?}", root, self.nodes[root_children_start..self.nodes.len()].iter().map(|n| n.node).collect::<Vec<_>>());
     self.nodes[idx_of_root].subtree_end = self.nodes.len();
   }
 
@@ -195,7 +192,6 @@ impl<E: EdgeLookup> Graph<E> {
         }
       )
       .collect();
-    println!("{:?}", is_in_mrs);
 
     #[cfg(feature = "viz-extra")] {
       self.viz_data.clear_highlighted();
@@ -361,7 +357,6 @@ mod tests {
         let vj = vars[j];
         let wi = tree.var_from_node_id(tree.nodes[n.parent_idx].node);
         let wj = tree.var_from_node_id(n.node);
-        println!("{} -> {}", wi.node, wj.node);
         g.add_constr(vi, n.incoming_edge_weight, vj);
         ((wi, wj), (vi, vj))
       })
@@ -378,7 +373,6 @@ mod tests {
 
     let mrs = g.compute_mrs();
     for mrs_tree in mrs {
-      println!("{:#?}", mrs_tree);
       let (obj, edge_sa) = g.edge_sensitivity_analysis(&mrs_tree);
       total_obj += obj;
       let (constr_map, mut subgraph) = build_minimal_graph(&mrs_tree);
@@ -430,7 +424,6 @@ mod tests {
     let mut mrs = g.compute_mrs();
     graph_testcase_assert_eq!(mrs.len(), 1);
     let mrs = mrs.pop().unwrap();
-    println!("{:?}", &mrs);
     Ok(())
   }
 }
