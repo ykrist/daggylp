@@ -425,6 +425,19 @@ impl<E: EdgeLookup> Graph<E> {
       Some(ModelState::Optimal)
     }
   }
+
+  pub fn write_debug(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+    for n in &self.nodes {
+      writeln!(f, "{} {} {}", n.lb, n.ub, n.x)?;
+    }
+    writeln!(f, "edges")?;
+    for e in self.edges.all_edges() {
+      writeln!(f, "{} {} {}", e.from, e.to, e.weight)?;
+    }
+    Ok(())
+  }
 }
 
 #[cfg(test)]

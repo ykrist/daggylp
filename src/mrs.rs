@@ -5,7 +5,7 @@ use crate::set_with_capacity;
 use std::cmp::{min, max};
 
 #[derive(Debug, Clone)]
-pub struct MrsTreeNode {
+struct MrsTreeNode {
   node: usize,
   parent_idx: usize,
   incoming_edge_weight: Weight,

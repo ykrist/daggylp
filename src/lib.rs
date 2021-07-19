@@ -5,9 +5,9 @@ mod graph;
 
 pub use graph::{Var, Constraint, Graph, SolveStatus, Weight, InfKind};
 
-mod mrs;
+pub mod mrs;
 #[cfg(any(test, feature = "viz"))]
-mod viz;
+pub mod viz;
 mod iis;
 mod error;
 mod model_states;

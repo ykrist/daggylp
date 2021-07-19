@@ -75,16 +75,16 @@ impl VizData {
 
 
 #[derive(Clone)]
-pub(crate) struct VizGraph<'a> {
-  graph: &'a Graph,
+pub struct VizGraph<'a, E> {
+  graph: &'a Graph<E>,
   config: VizConfig,
   var_names: Option<&'a dyn Fn(Var) -> String>,
   edge_fmt: Option<&'a dyn Fn(Var, Var, Weight) -> String>,
 }
 
 
-impl Graph {
-  pub(crate) fn viz(&self) -> VizGraph<'_> {
+impl<E: EdgeLookup> Graph<E> {
+  pub fn viz(&self) -> VizGraph<'_, E> {
     VizGraph {
       graph: self,
       config: Default::default(),
@@ -95,7 +95,7 @@ impl Graph {
 }
 
 
-impl<'a> VizGraph<'a> {
+impl<'a, E> VizGraph<'a, E> {
   pub fn fmt_vars(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
     self.var_names = Some(f);
     self
@@ -108,7 +108,7 @@ impl<'a> VizGraph<'a> {
 }
 
 
-pub(crate) trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + Sized
+pub trait GraphViz<'a, N, E>: GraphWalk<'a, N, E> + Labeller<'a, N, E> + Sized
   where
     N: Clone + 'a,
     E: Clone + 'a,
@@ -158,7 +158,7 @@ const ACTIVE_EDGE_COLOR : &'static str = "lightseagreen";
 const DEFAULT_EDGE_COLOR : &'static str = "grey";
 const DEFAULT_NODE_COLOR : &'static str = "black";
 
-impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
+impl<'a, E: EdgeLookup> GraphWalk<'a, usize, Edge> for VizGraph<'a, E> {
   fn nodes(&'a self) -> Nodes<'a, usize> {
     fn hide_scc(n: &Node) -> bool {
       !matches!(&n.kind, NodeKind::Scc(_))
@@ -184,13 +184,13 @@ impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   }
 
   fn edges(&'a self) -> Edges<'a, Edge> {
-    fn hide_scc(_: &Graph, e: &Edge) -> bool {
+    fn hide_scc<E>(_: &Graph<E>, e: &Edge) -> bool {
       matches!(&e.kind, EdgeKind::Regular)
     }
-    fn show_scc(_: &Graph, _: &Edge) -> bool {
+    fn show_scc<E>(_: &Graph<E>, _: &Edge) -> bool {
       true
     }
-    fn collapse_scc(g: &Graph, e: &Edge) -> bool {
+    fn collapse_scc<E>(g: &Graph<E>, e: &Edge) -> bool {
       !(matches!(&g.nodes[e.to].kind, NodeKind::SccMember(_))
         || matches!(&g.nodes[e.from].kind, NodeKind::SccMember(_)))
     }
@@ -216,7 +216,7 @@ impl<'a> GraphWalk<'a, usize, Edge> for VizGraph<'a> {
   }
 }
 
-impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
+impl<'a, E: EdgeLookup> Labeller<'a, usize, Edge> for VizGraph<'a, E> {
   fn graph_id(&'a self) -> Id<'a> { Id::new("debug").unwrap() }
 
   fn node_id(&'a self, n: &usize) -> Id<'a> { Id::new(format!("n{}", n)).unwrap() }
@@ -316,7 +316,7 @@ impl<'a> Labeller<'a, usize, Edge> for VizGraph<'a> {
   }
 }
 
-impl<'a> GraphViz<'a, usize, Edge> for VizGraph<'a> {
+impl<'a, E: EdgeLookup> GraphViz<'a, usize, Edge> for VizGraph<'a, E> {
   fn config(&self) -> &VizConfig {
     &self.config
   }
