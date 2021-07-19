@@ -81,6 +81,19 @@ impl MrsTree {
     self.nodes[idx_of_root].subtree_end = self.nodes.len();
   }
 
+  pub fn obj(&self) -> Weight {
+    let root = &self.nodes[0];
+    self.compute_obj_dfs(root.lb, root)
+  }
+
+  fn compute_obj_dfs(&self, x: Weight, node: &MrsTreeNode) -> Weight {
+    let mut total = node.obj * x;
+    for child in (node.children_start..node.children_end).map(|idx| &self.nodes[idx]) {
+      total += self.compute_obj_dfs(x + child.incoming_edge_weight, child);
+    }
+    total
+  }
+
   /// Return the variable at the root of the MRS, i.e. the variable whose lower bounds is in the MRS
   pub fn root(&self) -> Var {
     self.var_from_node_id(self.nodes[0].node)
@@ -411,6 +424,27 @@ mod tests {
   ))]
   fn sa_proptests(g: &mut Graph) -> GraphProptestResult {
     sensitivity_analysis(g)
+  }
+
+
+  #[graph_proptest]
+  #[input(acyclic_graph(
+  prop::collection::vec(nodes(MIN_WEIGHT..MAX_WEIGHT / 2, Just(MAX_WEIGHT), 0..=1i64), 2..100),
+  0..(20 as Weight)
+  ))]
+  fn compute_obj(g: &mut Graph) -> GraphProptestResult {
+    let status = g.solve();
+    prop_assert_matches!(status, SolveStatus::Optimal);
+    let mut total_obj_sa = 0;
+    let mut total_obj_direct = 0;
+
+    let mrs = g.compute_mrs();
+    for mrs_tree in mrs {
+      let obj_direct = mrs_tree.obj();
+      let (obj_sa, _) = g.edge_sensitivity_analysis(&mrs_tree);
+      prop_assert_eq!(obj_direct, obj_sa);
+    }
+    Ok(())
   }
 
   #[graph_test]
