@@ -138,7 +138,7 @@ impl Iis {
   pub fn iter_edge_vars<'a>(&'a self) -> impl Iterator<Item=Var> + 'a {
     let nodes = match self.kind {
       InfKind::Path => self.edge_nodes.as_slice(),
-      InfKind::Cycle => &self.edge_nodes[..self.edge_nodes.len()],
+      InfKind::Cycle => &self.edge_nodes[..self.edge_nodes.len()-1],
     };
     nodes.iter().copied().map(move |n| self.var_from_node_id(n))
   }
