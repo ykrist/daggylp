@@ -5,9 +5,7 @@ use std::ffi::OsString;
 use std::marker::PhantomData;
 use std::fmt;
 
-#[cfg(test)]
 mod data;
-#[cfg(test)]
 pub use data::*;
 
 #[cfg(feature = "grb")]

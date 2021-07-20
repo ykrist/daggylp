@@ -69,83 +69,13 @@ impl<T: Copy, const N: usize> ExactSizeIterator for ArrayIntoIter<T, N> {}
 impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 
 
-// #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-// struct UsizeNiche<const N: usize>(usize);
-
-// struct Index(Option<u32>);
-
-// impl<const N: usize> UsizeNiche<N> {
-//   fn assert_not_niche(value: usize) {
-//     assert!(value != N, "value is equal to niche value ({})", N)
-//   }
-//
-//   const fn new_none() -> Self {
-//     UsizeNiche(N)
-//   }
-//
-//   const unsafe fn new_unchecked(value: usize) -> Self {
-//     UsizeNiche(value)
-//   }
-//
-//
-//   fn new_some(value: usize) -> Self {
-//     Self::assert_not_niche(value);
-//     UsizeNiche(value)
-//   }
-//
-//   fn assert_some(&self) {
-//
-//   }
-//
-//   fn is_none(&self) -> bool {
-//     self.0 == N
-//   }
-//
-//   fn is_some(&self) -> bool {
-//     self.0 != N
-//   }
-//
-//   unsafe fn value_unchecked(&self) -> usize {
-//     self.0
-//   }
-//
-//   fn to_option(&self) -> Option<usize> {
-//     if self.is_none() { None }
-//     else { Some(self.0) }
-//   }
-//
-//   fn value(&self) -> usize {
-//     Self::assert_not_niche(self.0);
-//     self.0
-//   }
-//
-//   unsafe fn map_inplace_unchecked(&mut self, f: impl FnOnce(usize) -> usize) {
-//     self.0 = f(self.0);
-//   }
-//
-//   fn map_inplace(&mut self, f: impl FnOnce(usize) -> usize) {
-//     if self.is_some() {
-//       let v = f(self.0);
-//       if v == N {
-//         panic!("cannot map to niche value ({})", N);
-//       }
-//       self.0 = v;
-//     }
-//   }
-//
-//
-//   fn map(mut self, f: impl FnOnce(usize) -> usize) -> Self {
-//     self.map_inplace(f);
-//     self
-//   }
-// }
-//
-// type IndexNiche = UsizeNiche<{usize::MAX}>;
-//
-
 #[cfg(all(test, feature = "test-helpers"))]
 mod test_helpers {
-  use crate::test;
+  use crate::{test, Graph, SolveStatus::*};
+  use crate::test::GraphData;
+  use anyhow::Context;
+  use crate::viz::GraphViz;
+
   #[test]
   fn mark_failed_as_regression() -> anyhow::Result<()> {
       test::mark_failed_as_regression()

@@ -143,7 +143,7 @@ macro_rules! impl_graphid {
   };
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Graph<E = AdjacencyList<Vec<Edge>>> {
   id: u32,
   pub(crate) nodes: Vec<Node>,
@@ -430,7 +430,7 @@ impl<E: EdgeLookup> Graph<E> {
     use std::io::Write;
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
     for n in &self.nodes {
-      writeln!(f, "{} {} {}", n.lb, n.ub, n.x)?;
+      writeln!(f, "{} {} {}", n.lb, n.ub, n.obj)?;
     }
     writeln!(f, "edges")?;
     for e in self.edges.all_edges() {

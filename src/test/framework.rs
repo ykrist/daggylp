@@ -545,8 +545,12 @@ impl<F: GraphTest> GraphTestRunner<F> {
 
   pub fn run(&self, input: F::TestInput)
   {
+    std::fs::create_dir_all(test_testcase_failures_dir()).unwrap();
+
     let (input_patt, meta) = F::split_meta(input);
+    println!("searching `{}`", input_patt);
     for input in glob_graph_inputs(input_patt).pretty_unwrap() {
+      println!("input {:?}", input);
       let data = GraphData::load_from_file(&input).unwrap();
       let mut graph = data.build();
       let result = self.test.run(&mut graph, &data, meta.clone());

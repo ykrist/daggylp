@@ -118,11 +118,7 @@ mod tests {
     Ok(())
   }
 
-
-  #[graph_proptest]
-  #[config(cases=500, cpus=4, layout="fdp")]
-  #[input(graph(any_nodes(3..300), any_edge_weight()))]
-  fn compare_daggylp_with_gurobi(g: &mut Graph, data: &GraphData) -> GraphProptestResult {
+  fn compare_with_gurobi(g: &mut Graph, data: &GraphData) -> GraphProptestResult {
     let mut lp = Lp::build(data);
     let s = lp.solve().unwrap();
     match (g.solve(), s) {
@@ -138,6 +134,20 @@ mod tests {
       }
     }
     Ok(())
+  }
+
+  #[graph_proptest]
+  #[config(cases=500, cpus=4, layout="fdp")]
+  #[input(graph(any_nodes(3..300), any_edge_weight()))]
+  fn compare_with_gurobi_proptests(g: &mut Graph, data: &GraphData) -> GraphProptestResult {
+    compare_with_gurobi(g, data)
+  }
+
+  #[graph_test]
+  // #[input("apvrp/debug/DAG")]
+  #[input("apvrp/*/*")]
+  fn compare_with_gurobi_testcases(g: &mut Graph, data: &GraphData) -> GraphTestResult {
+    compare_with_gurobi(g, data).into_graph_test()
   }
 
 }
