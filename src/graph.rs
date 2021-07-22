@@ -10,7 +10,7 @@ use std::cmp::min;
 use std::option::Option::Some;
 use std::iter::{ExactSizeIterator, Map};
 use crate::graph::ModelState::Unsolved;
-use std::borrow::Cow;
+use std::borrow::{Cow, Borrow};
 use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
 pub use crate::edge_storage::{EdgeLookup};
 use crate::model_states::ModelAction;
@@ -127,7 +127,16 @@ pub(crate) trait GraphId {
   fn var_from_node_id(&self, node: NodeIdx) -> Var {
     Var { node, graph_id: self.graph_id() }
   }
+
+  fn check_graph_id<T: GraphId>(&self, b: &T) -> Result<(), crate::Error> {
+    if self.graph_id() != b.graph_id() {
+      Err(crate::Error::GraphMismatch)
+    } else {
+      Ok(())
+    }
+  }
 }
+
 
 macro_rules! impl_graphid {
   ([$($x:tt)*] $($y:tt)*) => {
@@ -141,6 +150,10 @@ macro_rules! impl_graphid {
       fn graph_id(&self) -> u32 { self.id }
     }
   };
+}
+
+impl GraphId for Var {
+  fn graph_id(&self) -> u32 { self.graph_id }
 }
 
 #[derive(Debug, Clone)]
@@ -349,6 +362,13 @@ impl<E: EdgeLookup> Graph<E> {
     Ok(obj)
   }
 
+
+  pub fn get_solution(&self, var: &Var) -> Result<Weight, crate::Error>
+  {
+    self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
+    self.check_graph_id(var)?;
+    Ok(self.nodes[var.node].x)
+  }
 
   fn forward_label<'b>(&'b mut self) -> Option<ModelState> {
     let mut queue = vec![];
