@@ -9,6 +9,8 @@ pub mod mrs;
 #[cfg(any(test, feature = "viz"))]
 pub mod viz;
 mod iis;
+pub use iis::Iis;
+
 mod error;
 mod model_states;
 
