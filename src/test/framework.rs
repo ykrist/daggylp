@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use proptest::prelude::*;
 use proptest::test_runner::{TestError, FileFailurePersistence, TestRunner as PropTestRunner};
 
-use crate::viz::{GraphViz, LayoutAlgo, SccViz, VizConfig};
+use crate::viz::{GraphViz, SccViz, VizConfig};
 use crate::graph::Graph;
 use crate::test::strategy::SccKind;
 use crate::iis::Iis;
@@ -135,12 +135,12 @@ impl TestManifest {
   }
 
   fn write_input_graph(&self, g: &GraphData, config: VizConfig) -> anyhow::Result<()> {
-    g.viz().configure(config).save_svg(self.path.with_file_name(&self.input_graph));
+    g.viz().configure(config).render(self.path.with_file_name(&self.input_graph));
     Ok(())
   }
 
   fn write_output_graph(&self, g: &Graph, config: VizConfig) -> anyhow::Result<()> {
-    g.viz().configure(config).save_svg(self.path.with_file_name(&self.output_graph));
+    g.viz().configure(config).render(self.path.with_file_name(&self.output_graph));
     Ok(())
   }
 
@@ -556,9 +556,9 @@ impl<F: GraphTest> GraphTestRunner<F> {
       let result = self.test.run(&mut graph, &data, meta.clone());
       if let Err(error) = result {
         let mut path = test_testcase_failures_dir().join(format!("{}.input.svg", self.id));
-        data.viz().configure(self.viz_config).save_svg(&path);
+        data.viz().configure(self.viz_config).render(&path);
         path.set_file_name(format!("{}.output.svg", self.id));
-        graph.viz().configure(self.viz_config).save_svg(path);
+        graph.viz().configure(self.viz_config).render(path);
         eprintln!("test case failure (input {:?}):\n{:?}", input.file_stem().unwrap(), error);
         panic!("test failed");
       }

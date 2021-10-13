@@ -258,7 +258,7 @@ mod smallvec_support {
   }
 }
 #[cfg(feature = "smallvec")]
-pub type SmallVec<const N: usize> = smallvec::Smallvec<[Edge; N]>;
+pub type SmallVec<const N: usize> = smallvec::SmallVec<[Edge; N]>;
 
 #[cfg(feature = "arrayvec")]
 mod arrayvec_support {

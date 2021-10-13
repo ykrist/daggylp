@@ -36,9 +36,9 @@ map_lit_to_variant!{ scc_viz_variant;
 }
 
 map_lit_to_variant!{ layout_algo_variant;
-  "dot" => crate::viz::LayoutAlgo::Dot,
-  "fdp" => crate::viz::LayoutAlgo::Fdp,
-  "neato" => crate::viz::LayoutAlgo::Neato,
+  "dot" => gvdot::Layout::Dot,
+  "fdp" => gvdot::Layout::Fdp,
+  "neato" => gvdot::Layout::Neato,
 }
 
 
