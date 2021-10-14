@@ -89,10 +89,6 @@ impl<'a, E> VizGraph<'a, E> {
     self.edge_fmt = Some(f);
     self
   }
-
-  pub fn qqq(&mut self) {
-    let mut g = gvdot::Graph::new().directed().in_memory();
-  }
 }
 
 
@@ -107,7 +103,8 @@ pub trait GraphViz : Sized
     let mut g = gvdot::Graph::new()
       .directed()
       .strict(true)
-      .stream_to_gv(self.config().layout, path)?;
+      .stream_to_gv(self.config().layout, path)?
+      .attr(gvdot::attr::RankDir, gvdot::val::RankDir::LR)?;
     self.visit(&mut g)?;
     let status = g.wait()?;
     assert!(status.success());
@@ -119,7 +116,9 @@ pub trait GraphViz : Sized
     let mut g = gvdot::Graph::new()
       .directed()
       .strict(true)
-      .create(gvdot::StrId::default(), file)?;
+      .create(gvdot::StrId::default(), file)?
+      .attr(gvdot::attr::RankDir, gvdot::val::RankDir::LR)?;
+
     self.visit(&mut g)?;
     g.finish()
   }
