@@ -99,6 +99,11 @@ impl MrsTree {
     self.var_from_node_id(self.nodes[0].node)
   }
 
+  /// Return the LB of the variable at the root of the MRS
+  pub fn root_lb(&self) -> Weight {
+    self.nodes[0].lb
+  }
+
   /// Iterate over the variables in this MRS
   pub fn vars(&self) -> impl Iterator<Item=Var> + '_ {
     self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
