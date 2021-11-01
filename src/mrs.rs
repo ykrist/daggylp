@@ -30,6 +30,14 @@ impl GraphId for MrsTree {
   fn graph_id(&self) -> u32 { self.graph_id }
 }
 
+pub trait MrsPathVisitor {
+  fn new_path(&mut self, lb_var: Var);
+
+  fn add_edge(&mut self, from: Var, to: Var);
+
+  fn end_path(&mut self);
+}
+
 impl MrsTree {
   fn build<E: EdgeLookup>(graph: &Graph<E>, in_mrs: &[bool], root: usize) -> Self {
     let r = &graph.nodes[root];
@@ -137,6 +145,53 @@ impl MrsTree {
       soln_buf[i] = max(n.lb, soln_buf[n.parent_idx] + n.incoming_edge_weight);
     }
   }
+
+
+  fn next_sibling(&self, node: usize) -> Option<usize> {
+    let parent = &self.nodes[self.nodes[node].parent_idx];
+    debug_assert!((parent.children_start..parent.children_end).contains(&node));
+    if node + 1 < parent.children_end {
+      Some(node + 1)
+    } else {
+      None
+    }
+  }
+
+  pub fn visit_paths(&self, mut cb: impl FnMut(&[Var])) {
+    let mut path = Vec::with_capacity(self.nodes.len());
+    let mut path_vars = Vec::with_capacity(self.nodes.len());
+
+    path.push(0usize);
+
+    loop {
+      let mut n = *path.last().unwrap();
+      let node = &self.nodes[n];
+      if node.children_start == node.children_end {
+        path_vars.clear();
+        path_vars.extend(path.iter().map(|&i| self.var_from_node_id(i)));
+        cb(&path_vars);
+
+        // Move to sibling or backtrack (repeat)
+        loop {
+          if let Some(s) = self.next_sibling(n) {
+            *path.last_mut().unwrap() = s;
+            break;
+          } else {
+            match path.pop() {
+              Some(_) => {
+                n = *path.last().unwrap();
+              },
+              None => return
+            }
+          }
+        }
+      } else {
+        path.push(node.children_start);
+      }
+    }
+  }
+
+
 }
 
 /// Compute a spanning tree of active edges for an SCC using Breadth-First Search.
@@ -229,8 +284,9 @@ impl<E: EdgeLookup> Graph<E> {
       .collect()
   }
 
+
   /// Marks the path to the MRS root, returning the root if the root has never been visited and None if it has.
-  fn mark_path_to_mrs_root(&self, is_in_mrs: &mut [bool], n: usize, node: &Node) -> Option<usize> { // TODO this should happen after the active edge re-labelling
+  fn mark_path_to_mrs_root(&self, is_in_mrs: &mut [bool], n: usize, node: &Node) -> Option<usize> {
     if !is_in_mrs[n] {
       is_in_mrs[n] = true;
       if let Some(pred) = node.active_pred {

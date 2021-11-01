@@ -1,5 +1,6 @@
 #![feature(generic_associated_types)]
 #![feature(option_result_unwrap_unchecked)]
+#![feature(array_windows)]
 #![allow(warnings)]
 mod graph;
 
