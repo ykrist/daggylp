@@ -122,6 +122,10 @@ impl MrsTree {
     self.nodes.iter().filter(|n| n.obj != 0).map(move |n| self.var_from_node_id(n.node))
   }
 
+  pub fn has_obj_vars(&self) -> bool {
+    self.nodes.iter().filter(|n| n.obj != 0).next().is_some()
+  }
+
   /// Iterate over the edge constraints in the MRS
   pub fn edge_constraints(&self) -> impl Iterator<Item=(Var, Var)> + '_ {
     self.nodes.iter().skip(1).map(move |n| { // first node is root node
@@ -147,48 +151,21 @@ impl MrsTree {
   }
 
 
-  fn next_sibling(&self, node: usize) -> Option<usize> {
-    let parent = &self.nodes[self.nodes[node].parent_idx];
-    debug_assert!((parent.children_start..parent.children_end).contains(&node));
-    if node + 1 < parent.children_end {
-      Some(node + 1)
+  fn visit_path_recursive(&self, cb: &mut impl FnMut(&[Var]), current_node: &MrsTreeNode, var_buf: &mut Vec<Var>) {
+    var_buf.push(self.var_from_node_id(current_node.node));
+    if current_node.children_start == current_node.children_end {
+      cb(var_buf);
     } else {
-      None
+      for child in current_node.children_start..current_node.children_end {
+        self.visit_path_recursive(cb, &self.nodes[child], var_buf);
+      }
     }
+    var_buf.pop();
   }
 
   pub fn visit_paths(&self, mut cb: impl FnMut(&[Var])) {
-    let mut path = Vec::with_capacity(self.nodes.len());
-    let mut path_vars = Vec::with_capacity(self.nodes.len());
-
-    path.push(0usize);
-
-    loop {
-      let mut n = *path.last().unwrap();
-      let node = &self.nodes[n];
-      if node.children_start == node.children_end {
-        path_vars.clear();
-        path_vars.extend(path.iter().map(|&i| self.var_from_node_id(i)));
-        cb(&path_vars);
-
-        // Move to sibling or backtrack (repeat)
-        loop {
-          if let Some(s) = self.next_sibling(n) {
-            *path.last_mut().unwrap() = s;
-            break;
-          } else {
-            match path.pop() {
-              Some(_) => {
-                n = *path.last().unwrap();
-              },
-              None => return
-            }
-          }
-        }
-      } else {
-        path.push(node.children_start);
-      }
-    }
+    let mut var_buf = Vec::with_capacity(self.nodes.len());
+    self.visit_path_recursive(&mut cb, &self.nodes[0], &mut var_buf);
   }
 
 
