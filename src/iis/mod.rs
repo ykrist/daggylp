@@ -1,7 +1,7 @@
 use crate::set_with_capacity;
 use crate::graph::*;
 use fnv::FnvHashSet;
-use crate::model_states::ModelAction;
+use crate::model_states::{ModelState, ModelAction};
 use crate::graph::SolveStatus::Infeasible;
 
 mod cycles;

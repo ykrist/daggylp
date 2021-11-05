@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use fnv::{FnvHashSet, FnvHashMap};
 use std::hash::Hash;
 use crate::graph::EdgeKind::{SccOut, SccIn, SccToScc};
-use crate::set_with_capacity;
+use crate::{set_with_capacity, ModelAction, ModelState};
 use crate::iis::Iis;
 use crate::scc::SccInfo;
 
@@ -13,7 +13,6 @@ use crate::graph::ModelState::Unsolved;
 use std::borrow::{Cow, Borrow};
 use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
 pub use crate::edge_storage::{EdgeLookup};
-use crate::model_states::ModelAction;
 
 pub type Weight = i64;
 pub(crate) type NodeIdx = usize;
@@ -30,15 +29,6 @@ pub enum SolveStatus {
   Optimal,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum ModelState {
-  Unsolved,
-  InfCycle { sccs: Vec<FnvHashSet<NodeIdx>>, first_inf_scc: usize },
-  InfPath(Vec<NodeIdx>),
-  Optimal,
-  Mrs,
-  Dirty { rebuild_sccs: bool },
-}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EdgeKind {

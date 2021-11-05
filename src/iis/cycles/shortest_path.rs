@@ -400,7 +400,7 @@ mod tests {
   use crate::*;
   use crate::test::{*, strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one}};
   use proptest::prelude::*;
-  use crate::graph::{ModelState, Graph};
+  use crate::graph::{Graph};
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
 
   /// Triangular graphs with a single non-zero edge

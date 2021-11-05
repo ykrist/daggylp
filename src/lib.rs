@@ -14,6 +14,7 @@ pub use iis::Iis;
 
 mod error;
 mod model_states;
+pub(crate) use model_states::*;
 
 #[cfg(test)]
 pub mod test;

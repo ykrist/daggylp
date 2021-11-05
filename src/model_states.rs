@@ -1,5 +1,17 @@
 use super::graph::*;
 use crate::{Error};
+use fnv::FnvHashSet;
+
+
+#[derive(Debug, Clone)]
+pub(crate) enum ModelState {
+  Unsolved,
+  InfCycle { sccs: Vec<FnvHashSet<NodeIdx>>, first_inf_scc: usize },
+  InfPath(Vec<NodeIdx>),
+  Optimal,
+  Mrs,
+  Dirty { rebuild_sccs: bool },
+}
 
 pub(crate) enum ModelAction {
   Solve,

@@ -3,6 +3,8 @@ use fnv::FnvHashSet;
 use std::ops::Range;
 use crate::set_with_capacity;
 use std::cmp::{min, max};
+use crate::model_states::{ModelState, ModelAction};
+use gvdot::attr::Model;
 
 #[derive(Debug, Clone)]
 struct MrsTreeNode {
@@ -149,26 +151,6 @@ impl MrsTree {
       soln_buf[i] = max(n.lb, soln_buf[n.parent_idx] + n.incoming_edge_weight);
     }
   }
-
-
-  fn visit_path_recursive(&self, cb: &mut impl FnMut(&[Var]), current_node: &MrsTreeNode, var_buf: &mut Vec<Var>) {
-    var_buf.push(self.var_from_node_id(current_node.node));
-    if current_node.children_start == current_node.children_end {
-      cb(var_buf);
-    } else {
-      for child in current_node.children_start..current_node.children_end {
-        self.visit_path_recursive(cb, &self.nodes[child], var_buf);
-      }
-    }
-    var_buf.pop();
-  }
-
-  pub fn visit_paths(&self, mut cb: impl FnMut(&[Var])) {
-    let mut var_buf = Vec::with_capacity(self.nodes.len());
-    self.visit_path_recursive(&mut cb, &self.nodes[0], &mut var_buf);
-  }
-
-
 }
 
 /// Compute a spanning tree of active edges for an SCC using Breadth-First Search.
@@ -193,6 +175,27 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
 }
 
 impl<E: EdgeLookup> Graph<E> {
+  pub fn visit_critical_paths(&mut self, mut callback: impl FnMut(&[Var])) -> Result<(), crate::Error>{
+    self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
+    self.compute_scc_active_edges();
+    let mut var_buf = Vec::new();
+
+    for (n, mut node) in self.nodes.iter().enumerate() {
+      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0  {
+        var_buf.clear();
+        var_buf.push(self.var_from_node_id(n));
+        while let Some(p) = node.active_pred {
+          var_buf.push(self.var_from_node_id(p));
+          node = &self.nodes[p];
+        }
+        var_buf.reverse();
+        callback(&var_buf);
+      }
+    }
+    Ok(())
+  }
+
+
   /// Returns the objective contribution of the tree, and for each edge constraint in the tree, returns:
   /// 1. The edge (v1, v2)
   /// 2. The total subtree objective of the subtree rooted at v2, assuming all constraints in the MRS hold.
@@ -229,7 +232,8 @@ impl<E: EdgeLookup> Graph<E> {
     (cum_obj_full_tree[0], edge_obj_diff)
   }
 
-  pub fn compute_mrs(&mut self) -> Vec<MrsTree> {
+  pub fn compute_mrs(&mut self) -> Result<Vec<MrsTree>, crate::Error> {
+    self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.compute_scc_active_edges();
     let mut is_in_mrs = vec![false; self.nodes.len()];
 
@@ -247,7 +251,7 @@ impl<E: EdgeLookup> Graph<E> {
       self.viz_data.clear_highlighted();
     }
 
-    roots.into_iter()
+    let forest = roots.into_iter()
       .map(|r| {
         let tree = MrsTree::build(self, &is_in_mrs, r);
         #[cfg(feature = "viz-extra")] {
@@ -258,7 +262,8 @@ impl<E: EdgeLookup> Graph<E> {
         }
         tree
       })
-      .collect()
+      .collect();
+    Ok(forest)
   }
 
 
@@ -300,6 +305,9 @@ impl<E: EdgeLookup> Graph<E> {
   ///
   /// Once this transformation is done, we have a spanning forest of the original, non-SCC nodes.
   fn compute_scc_active_edges(&mut self) { // FIXME should be a check to ensure this is only called once (Maybe a new model state)
+    if matches!(self.state, ModelState::Mrs) {
+      return;
+    }
     // Step 1: Mark active edges inside the SCC, and the active edge ENTERING the SCC (if applicable)
     for scc in &self.sccs {
       let (root, root_active_pred) = match self.nodes[scc.scc_node].active_pred {
@@ -336,6 +344,7 @@ impl<E: EdgeLookup> Graph<E> {
         _ => {}
       }
     }
+    self.state = ModelState::Mrs;
   }
 }
 
@@ -360,7 +369,7 @@ mod tests {
   fn trivial_objective_gives_empty(g: &mut Graph) -> GraphProptestResult {
     let status = g.solve();
     prop_assert_matches!(status, SolveStatus::Optimal);
-    prop_assert_eq!(g.compute_mrs().len(), 0);
+    prop_assert_eq!(g.compute_mrs()?.len(), 0);
     Ok(())
   }
 
@@ -375,7 +384,7 @@ mod tests {
 
     let mut seen_vars = FnvHashSet::default();
     let mut seen_cons = FnvHashSet::default();
-    let mrs = g.compute_mrs();
+    let mrs = g.compute_mrs()?;
     prop_assert!(mrs.len() > 0, "MRS should not be empty");
     // println!("{:?}", mrs);
     for mrs in mrs {
@@ -422,7 +431,7 @@ mod tests {
     let computed_obj = g.compute_obj()?;
     let mut total_obj = 0;
 
-    let mrs = g.compute_mrs();
+    let mrs = g.compute_mrs()?;
     for mrs_tree in mrs {
       let (obj, edge_sa) = g.edge_sensitivity_analysis(&mrs_tree);
       total_obj += obj;
@@ -476,7 +485,7 @@ mod tests {
     let mut total_obj_sa = 0;
     let mut total_obj_direct = 0;
 
-    let mrs = g.compute_mrs();
+    let mrs = g.compute_mrs()?;
     for mrs_tree in mrs {
       let obj_direct = mrs_tree.obj();
       let (obj_sa, _) = g.edge_sensitivity_analysis(&mrs_tree);
@@ -493,7 +502,7 @@ mod tests {
       g.compute_iis(true);
       anyhow::bail!("infeasible")
     }
-    let mut mrs = g.compute_mrs();
+    let mut mrs = g.compute_mrs()?;
     graph_testcase_assert_eq!(mrs.len(), 1);
     let mrs = mrs.pop().unwrap();
     Ok(())
