@@ -174,8 +174,10 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
   }
 }
 
+
+
 impl<E: EdgeLookup> Graph<E> {
-  pub fn visit_critical_paths(&mut self, mut callback: impl FnMut(&[Var])) -> Result<(), crate::Error>{
+  pub fn visit_critical_paths(&mut self, mut callback: impl FnMut(&Self, &[Var])) -> Result<(), crate::Error>{
     self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.compute_scc_active_edges();
     let mut var_buf = Vec::new();
@@ -189,7 +191,7 @@ impl<E: EdgeLookup> Graph<E> {
           node = &self.nodes[p];
         }
         var_buf.reverse();
-        callback(&var_buf);
+        callback(self, &var_buf);
       }
     }
     Ok(())
