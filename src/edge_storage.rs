@@ -47,7 +47,7 @@ impl EdgeDir for BackwardDir {
 type EdgesToNodes<I> = iter::Map<I, fn(&Edge) -> usize>;
 
 pub trait Neighbours<D: EdgeDir> {
-  type Neigh<'a>: Iterator<Item= & 'a Edge>;
+  type Neigh<'a>: Iterator<Item= & 'a Edge> where Self: 'a;
 
   fn neighbours(&self, node: usize) -> Self::Neigh<'_>;
 
@@ -71,7 +71,7 @@ pub trait BuildEdgeStorage {
 
 pub trait EdgeLookup: Clone + Neighbours<ForwardDir> + Neighbours<BackwardDir> {
   type Builder: BuildEdgeStorage<Finish=Self>;
-  type AllEdges<'a>: Iterator<Item= & 'a Edge>;
+  type AllEdges<'a>: Iterator<Item= & 'a Edge> where Self: 'a;
   /// Execute any queued removals.
   fn remove_update<F: Fn(&Edge) -> bool>(&mut self, should_remove: Option<F>);
 
