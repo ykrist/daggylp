@@ -177,6 +177,27 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
 
 
 impl<E: EdgeLookup> Graph<E> {
+  pub fn critical_paths(&mut self) -> Result<Vec<Vec<Var>>, crate::Error> {
+    self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
+    self.compute_scc_active_edges();
+    
+    let mut paths = Vec::new();
+
+    for (n, mut node) in self.nodes.iter().enumerate() {
+      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0  {
+        let mut path = Vec::new();
+        path.push(self.var_from_node_id(n));
+        while let Some(p) = node.active_pred {
+          path.push(self.var_from_node_id(p));
+          node = &self.nodes[p];
+        }
+        path.reverse();
+        paths.push(path);
+      }
+    }
+    Ok(paths)
+  }
+
   pub fn visit_critical_paths(&mut self, mut callback: impl FnMut(&Self, &[Var])) -> Result<(), crate::Error>{
     self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.compute_scc_active_edges();
