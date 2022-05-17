@@ -1,9 +1,9 @@
-use std::path::{PathBuf, Path};
 use std::borrow::Cow;
-use std::sync::mpsc;
 use std::ffi::OsString;
-use std::marker::PhantomData;
 use std::fmt;
+use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 mod data;
 pub use data::*;
@@ -14,7 +14,7 @@ mod lp;
 pub mod strategy;
 pub use strategy::SharableStrategy;
 
-pub use daggylp_macros::{graph_test, graph_proptest};
+pub use daggylp_macros::{graph_proptest, graph_test};
 
 mod framework;
 pub use framework::*;
@@ -35,7 +35,10 @@ pub fn test_failures_dir() -> &'static Path {
 }
 
 pub fn test_testcase_failures_dir() -> &'static Path {
-  Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testcase_failures"))
+  Path::new(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/testcase_failures"
+  ))
 }
 
 pub fn test_regressions_dir() -> &'static Path {

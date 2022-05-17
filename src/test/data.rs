@@ -1,11 +1,11 @@
-use std::path::Path;
-use fnv::FnvHashMap;
 use crate::graph::*;
+use crate::test::strategy::node;
+use anyhow::Context;
+use fnv::FnvHashMap;
 use proptest::option::of;
 use std::fmt;
 use std::io::Write;
-use anyhow::Context;
-use crate::test::strategy::node;
+use std::path::Path;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct NodeData {
@@ -41,7 +41,8 @@ impl GraphData {
   pub fn build(&self) -> Graph {
     let mut g = Graph::new();
 
-    let vars: Vec<_> = self.nodes
+    let vars: Vec<_> = self
+      .nodes
       .iter()
       .map(|data| g.add_var(data.obj, data.lb, data.ub))
       .collect();
@@ -61,11 +62,18 @@ impl GraphData {
     n
   }
 
-  pub fn with_node_and_edge_data(nodes: Vec<NodeData>, edges: FnvHashMap<(usize, usize), Weight>) -> Self {
+  pub fn with_node_and_edge_data(
+    nodes: Vec<NodeData>,
+    edges: FnvHashMap<(usize, usize), Weight>,
+  ) -> Self {
     GraphData { nodes, edges }
   }
 
-  pub fn with_node_data(nodes: Vec<NodeData>, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
+  pub fn with_node_data(
+    nodes: Vec<NodeData>,
+    mut conn: impl Connectivity,
+    mut edge_weights: impl EdgeWeights,
+  ) -> Self {
     let num_nodes = nodes.len();
     let num_possible_edges = num_nodes * (num_nodes - 1);
     conn.set_size(num_nodes, num_possible_edges);
@@ -80,14 +88,17 @@ impl GraphData {
     GraphData { nodes, edges }
   }
 
-  pub fn new(size: usize, mut nodes: impl NodeSpec, mut conn: impl Connectivity, mut edge_weights: impl EdgeWeights) -> Self {
+  pub fn new(
+    size: usize,
+    mut nodes: impl NodeSpec,
+    mut conn: impl Connectivity,
+    mut edge_weights: impl EdgeWeights,
+  ) -> Self {
     let nodes: Vec<_> = (0..size)
-      .map(|i| {
-        NodeData {
-          obj: nodes.obj(i).unwrap_or(0),
-          lb: nodes.lb(i).unwrap_or(0),
-          ub: nodes.ub(i).unwrap_or(Weight::MAX),
-        }
+      .map(|i| NodeData {
+        obj: nodes.obj(i).unwrap_or(0),
+        lb: nodes.lb(i).unwrap_or(0),
+        ub: nodes.ub(i).unwrap_or(Weight::MAX),
       })
       .collect();
 
@@ -95,8 +106,7 @@ impl GraphData {
   }
 
   pub fn save_to_file(&self, path: impl AsRef<Path>) {
-    let mut writer = std::io::BufWriter::new(
-      std::fs::File::create(path).unwrap());
+    let mut writer = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
 
     for n in &self.nodes {
       writeln!(&mut writer, "{} {} {}", n.lb, n.ub, n.obj).unwrap();
@@ -108,7 +118,8 @@ impl GraphData {
   }
 
   pub fn load_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-    let contents = std::fs::read_to_string(&path).with_context(|| format!("read file {:?}", path.as_ref()))?;
+    let contents =
+      std::fs::read_to_string(&path).with_context(|| format!("read file {:?}", path.as_ref()))?;
     let mut nodes = Vec::new();
     let mut edges = FnvHashMap::default();
 
@@ -142,16 +153,22 @@ impl GraphData {
     Ok(GraphData { nodes, edges })
   }
 
-  pub fn from_components(subgraphs: Vec<GraphData>, conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>) -> Self {
+  pub fn from_components(
+    subgraphs: Vec<GraphData>,
+    conn: Vec<(usize, usize, Box<dyn Connectivity>, Box<dyn EdgeWeights>)>,
+  ) -> Self {
     let subgraph_size: Vec<_> = subgraphs.iter().map(|g| g.nodes.len()).collect();
     let offsets: Vec<_> = {
       let mut offset = &mut 0;
 
-      subgraph_size.iter().map(|&s| {
-        let o = *offset;
-        *offset += s;
-        o
-      }).collect()
+      subgraph_size
+        .iter()
+        .map(|&s| {
+          let o = *offset;
+          *offset += s;
+          o
+        })
+        .collect()
     };
 
     let mut subgraphs = subgraphs.into_iter();
@@ -160,7 +177,11 @@ impl GraphData {
     g.nodes.reserve(subgraph_size[1..].iter().copied().sum());
     for (&offset, h) in offsets[1..].iter().zip(subgraphs) {
       g.nodes.extend_from_slice(&h.nodes);
-      g.edges.extend(h.edges.into_iter().map(|((i, j), w)| ((i + offset, j + offset), w)));
+      g.edges.extend(
+        h.edges
+          .into_iter()
+          .map(|((i, j), w)| ((i + offset, j + offset), w)),
+      );
     }
 
     for (sg_i, sg_j, mut conn, mut weights) in conn {
@@ -184,7 +205,6 @@ impl GraphData {
   }
 }
 
-
 pub trait Connectivity {
   fn connected(&mut self, from: usize, to: usize) -> bool;
 
@@ -192,49 +212,64 @@ pub trait Connectivity {
 
   /// If a graph of this size is construct with this connectivity, is it
   /// guaranteed to be strongly connected? Returning false is always correct.
-  fn strongly_connected(graph_size: usize) -> bool where Self: Sized { false }
+  fn strongly_connected(graph_size: usize) -> bool
+  where
+    Self: Sized,
+  {
+    false
+  }
 
-  fn mask<F: FnMut(usize, usize) -> bool>(self, mask: F) -> MaskEdges<Self, F> where Self: Sized {
-    MaskEdges {
-      orig: self,
-      mask,
-    }
+  fn mask<F: FnMut(usize, usize) -> bool>(self, mask: F) -> MaskEdges<Self, F>
+  where
+    Self: Sized,
+  {
+    MaskEdges { orig: self, mask }
   }
 }
-
 
 #[derive(Debug, Copy, Clone)]
 pub struct NoEdges();
 
 impl Connectivity for NoEdges {
-  fn connected(&mut self, _: usize, _: usize) -> bool { false }
+  fn connected(&mut self, _: usize, _: usize) -> bool {
+    false
+  }
 }
-
 
 #[derive(Debug, Copy, Clone)]
 pub struct AllEdges();
 
 impl Connectivity for AllEdges {
-  fn connected(&mut self, _: usize, _: usize) -> bool { true }
+  fn connected(&mut self, _: usize, _: usize) -> bool {
+    true
+  }
 
-  fn strongly_connected(_: usize) -> bool { true }
+  fn strongly_connected(_: usize) -> bool {
+    true
+  }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Cycle(usize);
 
 impl Cycle {
-  pub fn new() -> Self { Cycle(0) }
+  pub fn new() -> Self {
+    Cycle(0)
+  }
 }
 
 impl Connectivity for Cycle {
-  fn set_size(&mut self, nodes: usize, _: usize) { self.0 = nodes }
+  fn set_size(&mut self, nodes: usize, _: usize) {
+    self.0 = nodes
+  }
 
   fn connected(&mut self, from: usize, to: usize) -> bool {
     (from + 1) % self.0 == to
   }
 
-  fn strongly_connected(_: usize) -> bool { true }
+  fn strongly_connected(_: usize) -> bool {
+    true
+  }
 }
 
 /// Assume nodes are arranged like this:
@@ -258,14 +293,13 @@ impl Connectivity for Cycle {
 pub struct Triangular();
 
 pub fn triangular_number(n: usize) -> usize {
-  return n*(n + 3) / 2
+  return n * (n + 3) / 2;
 }
 
 pub fn inverse_triangular_number(t: usize) -> usize {
   let r = ((9 + 8 * t) as f64).sqrt() * 0.5 - 1.5;
   (r - 1e-10).ceil() as usize
 }
-
 
 impl Connectivity for Triangular {
   fn connected(&mut self, from: usize, to: usize) -> bool {
@@ -278,24 +312,27 @@ impl Connectivity for Triangular {
   }
 
   fn strongly_connected(size: usize) -> bool {
-    if size < 3 { return false }
+    if size < 3 {
+      return false;
+    }
     let last_node = size - 1;
     let rank = inverse_triangular_number(last_node);
-    let first_in_rank = triangular_number(rank -1 ) + 1;
+    let first_in_rank = triangular_number(rank - 1) + 1;
     last_node != first_in_rank
   }
 }
 
-
 pub fn square_size(n: usize) -> usize {
-  return (n as f64).sqrt().ceil() as usize
+  return (n as f64).sqrt().ceil() as usize;
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Square(usize);
 
 impl Square {
-  pub fn new() -> Self { Square(0) }
+  pub fn new() -> Self {
+    Square(0)
+  }
 
   fn row_col(&self, n: usize) -> (usize, usize) {
     let row = n / self.0;
@@ -310,22 +347,26 @@ impl Connectivity for Square {
   }
 
   fn connected(&mut self, from: usize, to: usize) -> bool {
-    let (row_from,col_from) = self.row_col(from);
+    let (row_from, col_from) = self.row_col(from);
     let (row_to, col_to) = self.row_col(to);
 
-    if row_from == row_to && (row_from + col_from) % 2 == 0 { // Horizontal edges
+    if row_from == row_to && (row_from + col_from) % 2 == 0 {
+      // Horizontal edges
       // left-to-right edges || right-to-left edges
       from + 1 == to || from == to + 1
-    } else if col_from == col_to && (row_from + col_from) % 2 != 0 { // Vertical edges
+    } else if col_from == col_to && (row_from + col_from) % 2 != 0 {
+      // Vertical edges
       // top-to-bottom edges    ||   bottom-to-top edges
-      (row_from + 1 == row_to)  || (row_from == row_to + 1)
+      (row_from + 1 == row_to) || (row_from == row_to + 1)
     } else {
       false
     }
   }
 
   fn strongly_connected(graph_size: usize) -> bool {
-    if graph_size < 4 { return false }
+    if graph_size < 4 {
+      return false;
+    }
     let mut sq = Square::new();
     sq.set_size(graph_size, usize::MAX);
     let last_node = graph_size - 1;
@@ -376,13 +417,15 @@ impl<E: Connectivity, F: FnMut(usize, usize) -> bool> Connectivity for MaskEdges
   }
 }
 
-
 pub trait EdgeWeights {
   fn weight(&mut self, from: usize, to: usize) -> Weight;
 
   fn set_size(&mut self, _nodes: usize, _edges: usize) {}
 
-  fn map<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F> where Self: Sized {
+  fn map<F: FnMut(usize, usize, Weight) -> Weight>(self, map: F) -> MapWeights<Self, F>
+  where
+    Self: Sized,
+  {
     MapWeights { orig: self, map }
   }
 }
@@ -390,9 +433,10 @@ pub trait EdgeWeights {
 pub struct AllSame(pub Weight);
 
 impl EdgeWeights for AllSame {
-  fn weight(&mut self, _: usize, _: usize) -> Weight { self.0 }
+  fn weight(&mut self, _: usize, _: usize) -> Weight {
+    self.0
+  }
 }
-
 
 pub struct MapWeights<E, F> {
   orig: E,
@@ -409,16 +453,27 @@ impl<E: EdgeWeights, F: FnMut(usize, usize, Weight) -> Weight> EdgeWeights for M
   }
 }
 
-
 pub trait NodeSpec {
-  fn lb(&mut self, _: usize) -> Option<Weight> { None }
+  fn lb(&mut self, _: usize) -> Option<Weight> {
+    None
+  }
 
-  fn ub(&mut self, _: usize) -> Option<Weight> { None }
+  fn ub(&mut self, _: usize) -> Option<Weight> {
+    None
+  }
 
-  fn obj(&mut self, _: usize) -> Option<Weight> { None }
+  fn obj(&mut self, _: usize) -> Option<Weight> {
+    None
+  }
 
-  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N> where Self: Sized {
-    CombinedNodeSpec { first: self, second: other }
+  fn combine<N: NodeSpec>(self, other: N) -> CombinedNodeSpec<Self, N>
+  where
+    Self: Sized,
+  {
+    CombinedNodeSpec {
+      first: self,
+      second: other,
+    }
   }
 
   fn set_num_nodes(&mut self, _: usize) {}
@@ -428,7 +483,6 @@ pub struct CombinedNodeSpec<A, B> {
   first: A,
   second: B,
 }
-
 
 macro_rules! first_then_second {
   ($method:ident) => {
@@ -458,9 +512,15 @@ pub struct IdenticalNodes {
 }
 
 impl NodeSpec for IdenticalNodes {
-  fn lb(&mut self, _: usize) -> Option<Weight> { Some(self.lb) }
-  fn ub(&mut self, _: usize) -> Option<Weight> { Some(self.ub) }
-  fn obj(&mut self, _: usize) -> Option<Weight> { Some(self.obj) }
+  fn lb(&mut self, _: usize) -> Option<Weight> {
+    Some(self.lb)
+  }
+  fn ub(&mut self, _: usize) -> Option<Weight> {
+    Some(self.ub)
+  }
+  fn obj(&mut self, _: usize) -> Option<Weight> {
+    Some(self.obj)
+  }
 }
 
 #[cfg(test)]

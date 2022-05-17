@@ -1,10 +1,10 @@
 use super::graph::*;
-use std::path::Path;
 use crate::iis::Iis;
 use fnv::FnvHashSet;
+use gvdot::{GraphComponent, SetAttribute};
 use std::fmt;
 use std::io;
-use gvdot::{SetAttribute, GraphComponent};
+use std::path::Path;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SccViz {
@@ -12,7 +12,6 @@ pub enum SccViz {
   Show,
   Collapse,
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct VizConfig {
@@ -23,7 +22,11 @@ pub struct VizConfig {
 
 impl Default for VizConfig {
   fn default() -> Self {
-    VizConfig { scc: SccViz::Show, show_edge_weights: true, layout: gvdot::Layout::Dot }
+    VizConfig {
+      scc: SccViz::Show,
+      show_edge_weights: true,
+      layout: gvdot::Layout::Dot,
+    }
   }
 }
 
@@ -57,7 +60,6 @@ impl VizData {
   }
 }
 
-
 #[derive(Clone)]
 pub struct VizGraph<'a, E> {
   graph: &'a Graph<E>,
@@ -65,7 +67,6 @@ pub struct VizGraph<'a, E> {
   var_names: Option<&'a dyn Fn(Var) -> String>,
   edge_fmt: Option<&'a dyn Fn(Var, Var, Weight) -> String>,
 }
-
 
 impl<E: EdgeLookup> Graph<E> {
   pub fn viz(&self) -> VizGraph<'_, E> {
@@ -77,7 +78,6 @@ impl<E: EdgeLookup> Graph<E> {
     }
   }
 }
-
 
 impl<'a, E> VizGraph<'a, E> {
   pub fn fmt_vars(mut self, f: &'a dyn Fn(Var) -> String) -> Self {
@@ -91,9 +91,7 @@ impl<'a, E> VizGraph<'a, E> {
   }
 }
 
-
-pub trait GraphViz : Sized
-{
+pub trait GraphViz: Sized {
   fn config(&self) -> &VizConfig;
   fn config_mut(&mut self) -> &mut VizConfig;
 
@@ -133,13 +131,13 @@ pub trait GraphViz : Sized
   }
 }
 
-const MRS_COLOR : &'static str = "blueviolet";
-const IIS_COLOR : &'static str = "orangered";
-const ACTIVE_EDGE_COLOR : &'static str = "lightseagreen";
-const DEFAULT_EDGE_COLOR : &'static str = "grey";
-const DEFAULT_NODE_COLOR : &'static str = "black";
+const MRS_COLOR: &'static str = "blueviolet";
+const IIS_COLOR: &'static str = "orangered";
+const ACTIVE_EDGE_COLOR: &'static str = "lightseagreen";
+const DEFAULT_EDGE_COLOR: &'static str = "grey";
+const DEFAULT_NODE_COLOR: &'static str = "black";
 
-impl<E: EdgeLookup> GraphViz for VizGraph<'_, E>  {
+impl<E: EdgeLookup> GraphViz for VizGraph<'_, E> {
   fn config(&self) -> &VizConfig {
     &self.config
   }
@@ -162,23 +160,34 @@ impl<E: EdgeLookup> GraphViz for VizGraph<'_, E>  {
       SccViz::Show => show_scc,
     };
 
-
-    for (n, node) in self.graph.nodes.iter().enumerate().filter(|(n, node)| filter_func(node)) {
+    for (n, node) in self
+      .graph
+      .nodes
+      .iter()
+      .enumerate()
+      .filter(|(n, node)| filter_func(node))
+    {
       let name = match node.kind {
         NodeKind::Scc(k) => format!("SCC[{}]", k),
-        _ => if let Some(f) = self.var_names {
-          f(self.graph.var_from_node_id(n))
-        } else {
-          format!("X[{}]", n)
+        _ => {
+          if let Some(f) = self.var_names {
+            f(self.graph.var_from_node_id(n))
+          } else {
+            format!("X[{}]", n)
+          }
         }
       };
 
       let mut border_color = None;
-      #[cfg(feature= "viz-extra")] {
-        match (self.graph.viz_data.last_solve, self.graph.viz_data.highlighted_nodes.contains(&n)) {
+      #[cfg(feature = "viz-extra")]
+      {
+        match (
+          self.graph.viz_data.last_solve,
+          self.graph.viz_data.highlighted_nodes.contains(&n),
+        ) {
           (Some(SolveStatus::Optimal), true) => border_color = Some(MRS_COLOR),
           (Some(SolveStatus::Infeasible(_)), true) => border_color = Some(IIS_COLOR),
-          _ => {},
+          _ => {}
         }
       }
       let border_color = border_color.unwrap_or(DEFAULT_NODE_COLOR);
@@ -191,24 +200,25 @@ impl<E: EdgeLookup> GraphViz for VizGraph<'_, E>  {
 
       let scc_member_obj_row = match (node.kind, node.obj) {
         // (NodeKind::SccMember(k), 0) => format!(r#"<TR><TD COLSPAN="3">SCC[{}]</TD></TR>"#, k),
-        (NodeKind::SccMember(k), obj) => format!(r#"<TR><TD>{}</TD><TD COLSPAN="2">SCC[{}]</TD></TR>"#, obj, k),
+        (NodeKind::SccMember(k), obj) => format!(
+          r#"<TR><TD>{}</TD><TD COLSPAN="2">SCC[{}]</TD></TR>"#,
+          obj, k
+        ),
         // (_, 0) => "".to_string(),
         (_, obj) => format!(r#"<TR><TD COLSPAN="3">{}</TD></TR>"#, obj),
       };
 
       let html = format!(
         concat!(
-        r#"<FONT FACE="fantasque sans mono">"#,
-        r#"<TABLE BORDER="0" CELLSPACING="0" CELLBORDER="1" BGCOLOR="{}" COLOR="{}">"#,
-        r#"<TR><TD COLSPAN="3">{}</TD></TR>"#,
-        "{}",
-        r#"<TR><TD>{}</TD><TD>{}</TD><TD>{}</TD></TR>"#,
-        r#"</TABLE>"#,
-        r#"</FONT>"#
+          r#"<FONT FACE="fantasque sans mono">"#,
+          r#"<TABLE BORDER="0" CELLSPACING="0" CELLBORDER="1" BGCOLOR="{}" COLOR="{}">"#,
+          r#"<TR><TD COLSPAN="3">{}</TD></TR>"#,
+          "{}",
+          r#"<TR><TD>{}</TD><TD>{}</TD><TD>{}</TD></TR>"#,
+          r#"</TABLE>"#,
+          r#"</FONT>"#
         ),
-        bg_color, border_color, name,
-        scc_member_obj_row,
-        node.lb, node.x, node.ub,
+        bg_color, border_color, name, scc_member_obj_row, node.lb, node.x, node.ub,
       );
       g.add_node(n)?
         .attr(gvdot::attr::Shape, gvdot::val::Shape::Plaintext)?
@@ -231,13 +241,30 @@ impl<E: EdgeLookup> GraphViz for VizGraph<'_, E>  {
       SccViz::Show => show_scc_edges,
     };
 
-    for e in self.graph.edges.all_edges().filter(|e| filter_func(self.graph, e)) {
+    for e in self
+      .graph
+      .edges
+      .all_edges()
+      .filter(|e| filter_func(self.graph, e))
+    {
       let e: &Edge = e;
       let mut color = None;
-      #[cfg(feature = "viz-extra")] {
-        match (self.graph.viz_data.last_solve, self.graph.viz_data.highlighted_edges.contains(&(e.from, e.to))) {
-          (Some(SolveStatus::Infeasible(_)), true) => { color = Some(IIS_COLOR); },
-          (Some(SolveStatus::Optimal), true) => { color = Some(MRS_COLOR); },
+      #[cfg(feature = "viz-extra")]
+      {
+        match (
+          self.graph.viz_data.last_solve,
+          self
+            .graph
+            .viz_data
+            .highlighted_edges
+            .contains(&(e.from, e.to)),
+        ) {
+          (Some(SolveStatus::Infeasible(_)), true) => {
+            color = Some(IIS_COLOR);
+          }
+          (Some(SolveStatus::Optimal), true) => {
+            color = Some(MRS_COLOR);
+          }
           _ => {}
         }
       }
@@ -245,29 +272,29 @@ impl<E: EdgeLookup> GraphViz for VizGraph<'_, E>  {
       if color.is_none() {
         match self.graph.nodes[e.to].active_pred {
           Some(pred) if pred == e.from => color = Some(ACTIVE_EDGE_COLOR),
-          _ => {},
+          _ => {}
         }
       }
       let color = color.unwrap_or("grey");
       let html = if let Some(fmt) = self.edge_fmt {
-        format!(r#"<FONT FACE="fantasque sans mono">{}</FONT>"#,
-                fmt(
-                  self.graph.var_from_node_id(e.from),
-                  self.graph.var_from_node_id(e.to),
-                  e.weight
-                ))
+        format!(
+          r#"<FONT FACE="fantasque sans mono">{}</FONT>"#,
+          fmt(
+            self.graph.var_from_node_id(e.from),
+            self.graph.var_from_node_id(e.to),
+            e.weight
+          )
+        )
       } else {
         format!(r#"<FONT FACE="fantasque sans mono">{}</FONT>"#, e.weight)
       };
       g.add_edge(e.from, e.to)?
         .attr(gvdot::attr::Label, gvdot::attr::html(&html))?
         .attr(gvdot::attr::Color, color)?;
-
     }
     Ok(())
   }
 }
-
 
 #[cfg(test)]
 pub use viz_graph_data::VizGraphData;
@@ -304,14 +331,13 @@ mod viz_graph_data {
       for n in 0..self.graph.nodes.len() {
         g.add_node(n)?;
       }
-      for &(i,j) in self.graph.edges.keys() {
+      for &(i, j) in self.graph.edges.keys() {
         g.add_edge(i, j)?;
       }
       Ok(())
     }
   }
 }
-
 
 // #[cfg(test)]
 // mod tests {

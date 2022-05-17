@@ -1,8 +1,7 @@
-use std::cmp::min;
-use fnv::{FnvHashMap, FnvHashSet};
 use crate::graph::*;
 use crate::set_with_capacity;
-
+use fnv::{FnvHashMap, FnvHashSet};
+use std::cmp::min;
 
 #[derive(Debug, Clone)]
 pub struct SccInfo {
@@ -44,7 +43,6 @@ impl BoundInfeas {
   }
 }
 
-
 #[derive(Copy, Clone)]
 struct NodeAttr {
   lowlink: usize,
@@ -54,7 +52,14 @@ struct NodeAttr {
 const UNDEF: usize = usize::MAX;
 
 impl<E: EdgeLookup> Graph<E> {
-  fn tarjan(&self, sccs: &mut Vec<FnvHashSet<usize>>, stack: &mut Vec<usize>, attr: &mut [NodeAttr], v: usize, next_idx: &mut usize) {
+  fn tarjan(
+    &self,
+    sccs: &mut Vec<FnvHashSet<usize>>,
+    stack: &mut Vec<usize>,
+    attr: &mut [NodeAttr],
+    v: usize,
+    next_idx: &mut usize,
+  ) {
     let node_attr = &mut attr[v];
     node_attr.index = *next_idx;
     node_attr.lowlink = *next_idx;
@@ -81,7 +86,8 @@ impl<E: EdgeLookup> Graph<E> {
       let w = stack.pop().unwrap();
       attr[w].onstack = false;
 
-      if w != v { // ignore trivial SCCs of size 1
+      if w != v {
+        // ignore trivial SCCs of size 1
         let mut scc = set_with_capacity(16);
         scc.insert(w);
         loop {
@@ -101,8 +107,14 @@ impl<E: EdgeLookup> Graph<E> {
   pub(crate) fn find_sccs(&mut self) -> Vec<FnvHashSet<usize>> {
     debug_assert_eq!(self.sccs.len(), 0);
 
-
-    let mut attr = vec![NodeAttr{ lowlink: UNDEF, index: UNDEF, onstack: false }; self.nodes.len()];
+    let mut attr = vec![
+      NodeAttr {
+        lowlink: UNDEF,
+        index: UNDEF,
+        onstack: false
+      };
+      self.nodes.len()
+    ];
     let mut next_idx = 0;
     let mut stack = Vec::with_capacity(32);
     let mut sccs = Vec::new();
@@ -117,7 +129,11 @@ impl<E: EdgeLookup> Graph<E> {
 
   /// Returns a bound infeasibility if one exists.  If `extrema = true`, finds the greatest violation (min UB, max LB)
   /// Returns None if SCC is feasible.
-  pub(crate) fn find_scc_bound_infeas(&self, scc: impl IntoIterator<Item=usize>, extrema: bool) -> Option<BoundInfeas> {
+  pub(crate) fn find_scc_bound_infeas(
+    &self,
+    scc: impl IntoIterator<Item = usize>,
+    extrema: bool,
+  ) -> Option<BoundInfeas> {
     let mut nodes = scc.into_iter().map(|n| (n, &self.nodes[n]));
     let (n, first_node) = nodes.next().expect("expected non-empty iterator");
     let mut bi = BoundInfeas::new(n, first_node);
@@ -126,7 +142,9 @@ impl<E: EdgeLookup> Graph<E> {
       nodes.for_each(|(n, node)| bi.update(n, node));
     } else {
       for (n, node) in nodes {
-        if bi.ub < bi.lb { return Some(bi) }
+        if bi.ub < bi.lb {
+          return Some(bi);
+        }
         bi.update(n, node);
       }
     }
@@ -138,7 +156,6 @@ impl<E: EdgeLookup> Graph<E> {
     }
   }
 
-
   // TODO: make this return the scc kind
   pub(crate) fn scc_is_feasible(&self, scc: &FnvHashSet<usize>) -> bool {
     for &n in scc {
@@ -149,17 +166,25 @@ impl<E: EdgeLookup> Graph<E> {
       }
     }
 
-    self.find_scc_bound_infeas(scc.iter().copied(), false).is_none()
+    self
+      .find_scc_bound_infeas(scc.iter().copied(), false)
+      .is_none()
   }
 
   pub(crate) fn condense(&mut self, sccs: Vec<FnvHashSet<usize>>) {
     use EdgeKind::*;
     // Add new SCC nodes
     for scc in sccs {
-      let (lb_node, lb) = scc.iter().map(|&n| (n, self.nodes[n].lb))
-        .max_by_key(|pair| pair.1).unwrap();
-      let (ub_node, ub) = scc.iter().map(|&n| (n, self.nodes[n].ub))
-        .min_by_key(|pair| pair.1).unwrap();
+      let (lb_node, lb) = scc
+        .iter()
+        .map(|&n| (n, self.nodes[n].lb))
+        .max_by_key(|pair| pair.1)
+        .unwrap();
+      let (ub_node, ub) = scc
+        .iter()
+        .map(|&n| (n, self.nodes[n].ub))
+        .min_by_key(|pair| pair.1)
+        .unwrap();
 
       let scc_idx = self.sccs.len();
       let scc_n = self.nodes.len();
@@ -188,8 +213,13 @@ impl<E: EdgeLookup> Graph<E> {
     // Add new edges in and out of the SCC
     let mut new_edges = FnvHashMap::<(usize, usize), Edge>::default();
     let mut add_edge = |new_edges: &mut FnvHashMap<(usize, usize), Edge>, edge: Edge| {
-      new_edges.entry((edge.from, edge.to))
-        .and_modify(|e| if e.weight < edge.weight { *e = edge })
+      new_edges
+        .entry((edge.from, edge.to))
+        .and_modify(|e| {
+          if e.weight < edge.weight {
+            *e = edge
+          }
+        })
         .or_insert(edge);
     };
 
@@ -197,18 +227,22 @@ impl<E: EdgeLookup> Graph<E> {
       for &n in &scc.nodes {
         for e in self.edges.predecessors(n) {
           let mut e = *e;
-          if scc.nodes.contains(&e.from) { continue }
+          if scc.nodes.contains(&e.from) {
+            continue;
+          }
 
           match self.nodes[e.from].kind {
             NodeKind::Var => {
               e.kind = SccIn(e.to);
-            },
+            }
             NodeKind::SccMember(k) => {
-              e.kind = SccToScc { from: e.from, to: e.to };
+              e.kind = SccToScc {
+                from: e.from,
+                to: e.to,
+              };
               e.from = self.sccs[k].scc_node;
-            },
+            }
             NodeKind::Scc(_) => unreachable!(),
-
           };
           e.to = scc.scc_node;
           add_edge(&mut new_edges, e);
@@ -216,15 +250,18 @@ impl<E: EdgeLookup> Graph<E> {
 
         for e in self.edges.successors(n) {
           let mut e = *e;
-          if scc.nodes.contains(&e.to) { continue}
+          if scc.nodes.contains(&e.to) {
+            continue;
+          }
           match self.nodes[e.to].kind {
-            NodeKind::Var => {
-              e.kind = SccOut(e.from)
-            },
+            NodeKind::Var => e.kind = SccOut(e.from),
             NodeKind::SccMember(k) => {
-              e.kind = SccToScc { from: e.from, to: e.to };
+              e.kind = SccToScc {
+                from: e.from,
+                to: e.to,
+              };
               e.to = self.sccs[k].scc_node;
-            },
+            }
             NodeKind::Scc(_) => unreachable!(),
           };
           e.from = scc.scc_node;
@@ -240,11 +277,11 @@ impl<E: EdgeLookup> Graph<E> {
 mod tests {
   #[macro_use]
   use crate::*;
-  use crate::test::*;
-  use crate::test::strategy::*;
-  use proptest::prelude::*;
   use crate::graph::Graph;
-  use serde::{Serialize, Deserialize};
+  use crate::test::strategy::*;
+  use crate::test::*;
+  use proptest::prelude::*;
+  use serde::{Deserialize, Serialize};
 
   #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
   struct SccSizeOrder(Vec<usize>);
@@ -257,24 +294,25 @@ mod tests {
     }
   }
 
-  fn multi_scc_graph() -> impl SharableStrategy<Value=(GraphData, SccSizeOrder)> {
+  fn multi_scc_graph() -> impl SharableStrategy<Value = (GraphData, SccSizeOrder)> {
     let scc = (4..=8usize).prop_flat_map(|s| scc_graph(s, SccKind::Feasible));
-    prop::collection::vec(scc, 1..=50)
-      .prop_map(|sccs| {
-        let sizes = SccSizeOrder(sccs.iter().map(|g| g.nodes.len()).collect());
-        let conn = (1..sccs.len()).map(|child_scc| {
+    prop::collection::vec(scc, 1..=50).prop_map(|sccs| {
+      let sizes = SccSizeOrder(sccs.iter().map(|g| g.nodes.len()).collect());
+      let conn = (1..sccs.len())
+        .map(|child_scc| {
           let parent_scc = (child_scc - 1) / 2;
-          let conn : Box<dyn Connectivity> = Box::new(AllEdges());
-          let weights : Box<dyn EdgeWeights> = Box::new(AllSame(1));
+          let conn: Box<dyn Connectivity> = Box::new(AllEdges());
+          let weights: Box<dyn EdgeWeights> = Box::new(AllSame(1));
           (child_scc, parent_scc, conn, weights)
-        }).collect();
-        let sz : Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
-        (GraphData::from_components(sccs, conn), sizes)
-      })
+        })
+        .collect();
+      let sz: Vec<_> = sccs.iter().map(|s| s.nodes.len()).collect();
+      (GraphData::from_components(sccs, conn), sizes)
+    })
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(multi_scc_graph())]
   fn sizes(g: &mut Graph, actual_sizes: SccSizeOrder) -> GraphProptestResult {
     let sccs = g.find_sccs();

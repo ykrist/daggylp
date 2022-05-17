@@ -1,12 +1,12 @@
-use crate::graph::{Graph, Weight};
-use grb::prelude::*;
-use crate::map_with_capacity;
-use fnv::FnvHashMap;
-use crate::test::*;
 use crate::graph::*;
-use serde::{Serialize, Deserialize};
+use crate::graph::{Graph, Weight};
+use crate::map_with_capacity;
+use crate::test::*;
+use fnv::FnvHashMap;
+use grb::prelude::*;
+use serde::{Deserialize, Serialize};
 
-thread_local!{
+thread_local! {
   static ENV: grb::Env = {
       let mut env = grb::Env::empty().unwrap();
       env.set(param::OutputFlag, 0).unwrap();
@@ -31,12 +31,19 @@ impl Lp {
     for (i, node) in graph.nodes.iter().enumerate() {
       vars.push(add_ctsvar!(model, bounds: node.lb..node.ub, obj: node.obj).unwrap());
     }
-    for (&(i,j), &w) in &graph.edges {
-      constr.insert((i, j), model.add_constr("", c!(vars[i] + w <= vars[j])).unwrap());
+    for (&(i, j), &w) in &graph.edges {
+      constr.insert(
+        (i, j),
+        model.add_constr("", c!(vars[i] + w <= vars[j])).unwrap(),
+      );
     }
 
     model.update().unwrap();
-    Lp { vars, constr, model }
+    Lp {
+      vars,
+      constr,
+      model,
+    }
   }
 
   fn solve(&mut self) -> grb::Result<LpSolution> {
@@ -45,28 +52,35 @@ impl Lp {
       Status::Infeasible => {
         self.model.compute_iis()?;
         let mut edges = Vec::new();
-        for (&(i,j), c) in &self.constr {
+        for (&(i, j), c) in &self.constr {
           if self.model.get_obj_attr(attr::IISConstr, c)? > 0 {
-            edges.push((i,j));
+            edges.push((i, j));
           }
         }
         let mut ubs = Vec::new();
         let mut lbs = Vec::new();
         for (i, v) in self.vars.iter().enumerate() {
-          if self.model.get_obj_attr(attr::IISUB, v)? > 0 { ubs.push(i); }
-          if self.model.get_obj_attr(attr::IISLB, v)? > 0 { lbs.push(i); }
+          if self.model.get_obj_attr(attr::IISUB, v)? > 0 {
+            ubs.push(i);
+          }
+          if self.model.get_obj_attr(attr::IISLB, v)? > 0 {
+            lbs.push(i);
+          }
         }
         ubs.sort();
         lbs.sort();
         edges.sort();
         Ok(LpSolution::Infeasible { lbs, ubs, edges })
-      },
+      }
       Status::Optimal => {
-        let soln = self.model.get_obj_attr_batch(attr::X, self.vars.iter().copied())?
-          .into_iter().map(|x| x.round() as Weight)
+        let soln = self
+          .model
+          .get_obj_attr_batch(attr::X, self.vars.iter().copied())?
+          .into_iter()
+          .map(|x| x.round() as Weight)
           .collect();
         Ok(LpSolution::Optimal(soln))
-      },
+      }
       other => panic!("unexpected model status: {:?}", other),
     }
   }
@@ -75,23 +89,21 @@ impl Lp {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 enum LpSolution {
   Optimal(Vec<Weight>),
-  Infeasible{
+  Infeasible {
     edges: Vec<(usize, usize)>,
     lbs: Vec<usize>,
     ubs: Vec<usize>,
-  }
+  },
 }
-
-
 
 #[cfg(test)]
 mod tests {
   use super::*;
   #[macro_use]
   use crate::*;
-  use crate::test::*;
-  use crate::test::strategy::*;
   use crate::graph::*;
+  use crate::test::strategy::*;
+  use crate::test::*;
   use proptest::prelude::*;
 
   #[graph_test]
@@ -108,11 +120,20 @@ mod tests {
     let s = lp.solve().unwrap();
     match (g.solve(), s) {
       (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
-        let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_))).map(|n| n.x).collect();
+        let graph_soln: Vec<_> = g
+          .nodes
+          .iter()
+          .filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_)))
+          .map(|n| n.x)
+          .collect();
         graph_testcase_assert_eq!(graph_soln, solution);
-      },
+      }
       (g_status, lp_status) => {
-        Err(anyhow::anyhow!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status))?;
+        Err(anyhow::anyhow!(
+          "DLP status: {:?} != {:?} Gurobi status ",
+          g_status,
+          lp_status
+        ))?;
       }
     }
     Ok(())
@@ -123,21 +144,28 @@ mod tests {
     let s = lp.solve().unwrap();
     match (g.solve(), s) {
       (SolveStatus::Optimal, LpSolution::Optimal(solution)) => {
-        let graph_soln : Vec<_> = g.nodes.iter().filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_))).map(|n| n.x).collect();
+        let graph_soln: Vec<_> = g
+          .nodes
+          .iter()
+          .filter(|n: &&Node| !matches!(n.kind, NodeKind::Scc(_)))
+          .map(|n| n.x)
+          .collect();
         prop_assert_eq!(graph_soln, solution);
-      },
-      (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {
-
       }
+      (SolveStatus::Infeasible(_), LpSolution::Infeasible { lbs, ubs, edges }) => {}
       (g_status, lp_status) => {
-        test_case_bail!("DLP status: {:?} != {:?} Gurobi status ", g_status, lp_status)
+        test_case_bail!(
+          "DLP status: {:?} != {:?} Gurobi status ",
+          g_status,
+          lp_status
+        )
       }
     }
     Ok(())
   }
 
   #[graph_proptest]
-  #[config(cases=500, cpus=4, layout="fdp")]
+  #[config(cases = 500, cpus = 4, layout = "fdp")]
   #[input(graph(any_nodes(3..300), any_edge_weight()))]
   fn compare_with_gurobi_proptests(g: &mut Graph, data: &GraphData) -> GraphProptestResult {
     compare_with_gurobi(g, data)
@@ -149,5 +177,4 @@ mod tests {
   fn compare_with_gurobi_testcases(g: &mut Graph, data: &GraphData) -> GraphTestResult {
     compare_with_gurobi(g, data).into_graph_test()
   }
-
 }

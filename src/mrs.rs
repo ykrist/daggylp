@@ -1,10 +1,10 @@
 use super::graph::*;
-use fnv::FnvHashSet;
-use std::ops::Range;
+use crate::model_states::{ModelAction, ModelState};
 use crate::set_with_capacity;
-use std::cmp::{min, max};
-use crate::model_states::{ModelState, ModelAction};
+use fnv::FnvHashSet;
 use gvdot::attr::Model;
+use std::cmp::{max, min};
+use std::ops::Range;
 
 #[derive(Debug, Clone)]
 struct MrsTreeNode {
@@ -29,7 +29,9 @@ pub struct MrsTree {
 }
 
 impl GraphId for MrsTree {
-  fn graph_id(&self) -> u32 { self.graph_id }
+  fn graph_id(&self) -> u32 {
+    self.graph_id
+  }
 }
 
 pub trait MrsPathVisitor {
@@ -55,29 +57,39 @@ impl MrsTree {
       obj: r.obj,
     }];
 
-    let mut tree = MrsTree { graph_id: graph.graph_id(), nodes };
+    let mut tree = MrsTree {
+      graph_id: graph.graph_id(),
+      nodes,
+    };
     tree.build_recursive(graph, in_mrs, 0);
     debug_assert_eq!(tree.nodes[0].subtree_end, tree.nodes.len());
     tree
   }
 
-  fn build_recursive<E: EdgeLookup>(&mut self, graph: &Graph<E>, in_mrs: &[bool], idx_of_root: usize) {
+  fn build_recursive<E: EdgeLookup>(
+    &mut self,
+    graph: &Graph<E>,
+    in_mrs: &[bool],
+    idx_of_root: usize,
+  ) {
     let root = self.nodes[idx_of_root].node;
     debug_assert_eq!(self.nodes[idx_of_root].node, root);
     let root_children_start = self.nodes.len();
     for e in graph.edges.successors(root) {
-      if matches!(&e.kind, &EdgeKind::Regular) && in_mrs[e.to] && graph.nodes[e.to].active_pred == Some(root) {
+      if matches!(&e.kind, &EdgeKind::Regular)
+        && in_mrs[e.to]
+        && graph.nodes[e.to].active_pred == Some(root)
+      {
         let child = &graph.nodes[e.to];
         self.nodes.push(MrsTreeNode {
           node: e.to,
           parent_idx: idx_of_root,
           children_start: usize::MAX, // placeholder
-          children_end: usize::MAX, // placeholder
-          subtree_end: usize::MAX, // placeholder
+          children_end: usize::MAX,   // placeholder
+          subtree_end: usize::MAX,    // placeholder
           lb: child.lb,
           obj: child.obj,
           incoming_edge_weight: e.weight,
-
         });
       }
     }
@@ -115,13 +127,20 @@ impl MrsTree {
   }
 
   /// Iterate over the variables in this MRS
-  pub fn vars(&self) -> impl Iterator<Item=Var> + '_ {
-    self.nodes.iter().map(move |n| self.var_from_node_id(n.node))
+  pub fn vars(&self) -> impl Iterator<Item = Var> + '_ {
+    self
+      .nodes
+      .iter()
+      .map(move |n| self.var_from_node_id(n.node))
   }
 
   /// Iterate over the variables in this MRS whose objectives are non-zero
-  pub fn obj_vars(&self) -> impl Iterator<Item=Var> + '_ {
-    self.nodes.iter().filter(|n| n.obj != 0).map(move |n| self.var_from_node_id(n.node))
+  pub fn obj_vars(&self) -> impl Iterator<Item = Var> + '_ {
+    self
+      .nodes
+      .iter()
+      .filter(|n| n.obj != 0)
+      .map(move |n| self.var_from_node_id(n.node))
   }
 
   pub fn has_obj_vars(&self) -> bool {
@@ -129,16 +148,23 @@ impl MrsTree {
   }
 
   /// Iterate over the edge constraints in the MRS
-  pub fn edge_constraints(&self) -> impl Iterator<Item=(Var, Var)> + '_ {
-    self.nodes.iter().skip(1).map(move |n| { // first node is root node
-      (self.var_from_node_id(self.nodes[n.parent_idx].node), self.var_from_node_id(n.node))
+  pub fn edge_constraints(&self) -> impl Iterator<Item = (Var, Var)> + '_ {
+    self.nodes.iter().skip(1).map(move |n| {
+      // first node is root node
+      (
+        self.var_from_node_id(self.nodes[n.parent_idx].node),
+        self.var_from_node_id(n.node),
+      )
     })
   }
 
   /// Iterate over the edge constraints in the MRS, as Constraint objects.
-  pub fn constraints(&self) -> impl Iterator<Item=Constraint> + '_ {
-    std::iter::once(Constraint::Lb(self.var_from_node_id(self.nodes[0].node)))
-      .chain(self.edge_constraints().map(|(vi, vj)| Constraint::Edge(vi, vj)))
+  pub fn constraints(&self) -> impl Iterator<Item = Constraint> + '_ {
+    std::iter::once(Constraint::Lb(self.var_from_node_id(self.nodes[0].node))).chain(
+      self
+        .edge_constraints()
+        .map(|(vi, vj)| Constraint::Edge(vi, vj)),
+    )
   }
 
   /// Computes the optimal solution of the problem defined by a subtree of the MRS.
@@ -146,15 +172,28 @@ impl MrsTree {
     // We can just traverse in topological order here
     let root = &self.nodes[root_idx];
     soln_buf[root_idx] = root.lb;
-    for (i, n) in self.nodes.iter().enumerate().skip(root.children_start).take(root.subtree_end - root.children_start) {
-      debug_assert!(n.parent_idx == root_idx || (root.children_start..root.subtree_end).contains(&i));
+    for (i, n) in self
+      .nodes
+      .iter()
+      .enumerate()
+      .skip(root.children_start)
+      .take(root.subtree_end - root.children_start)
+    {
+      debug_assert!(
+        n.parent_idx == root_idx || (root.children_start..root.subtree_end).contains(&i)
+      );
       soln_buf[i] = max(n.lb, soln_buf[n.parent_idx] + n.incoming_edge_weight);
     }
   }
 }
 
 /// Compute a spanning tree of active edges for an SCC using Breadth-First Search.
-fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &FnvHashSet<usize>, root: usize) {
+fn scc_spanning_tree_bfs<E: EdgeLookup>(
+  edges: &E,
+  nodes: &mut [Node],
+  scc: &FnvHashSet<usize>,
+  root: usize,
+) {
   let mut queue = std::collections::VecDeque::with_capacity(scc.len());
   queue.push_back(root);
   while let Some(i) = queue.pop_front() {
@@ -174,17 +213,15 @@ fn scc_spanning_tree_bfs<E: EdgeLookup>(edges: &E, nodes: &mut [Node], scc: &Fnv
   }
 }
 
-
-
 impl<E: EdgeLookup> Graph<E> {
   pub fn critical_paths(&mut self) -> Result<Vec<Vec<Var>>, crate::Error> {
     self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.compute_scc_active_edges();
-    
+
     let mut paths = Vec::new();
 
     for (n, mut node) in self.nodes.iter().enumerate() {
-      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0  {
+      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0 {
         let mut path = Vec::new();
         path.push(self.var_from_node_id(n));
         while let Some(p) = node.active_pred {
@@ -198,13 +235,16 @@ impl<E: EdgeLookup> Graph<E> {
     Ok(paths)
   }
 
-  pub fn visit_critical_paths(&mut self, mut callback: impl FnMut(&Self, &[Var])) -> Result<(), crate::Error>{
+  pub fn visit_critical_paths(
+    &mut self,
+    mut callback: impl FnMut(&Self, &[Var]),
+  ) -> Result<(), crate::Error> {
     self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.compute_scc_active_edges();
     let mut var_buf = Vec::new();
 
     for (n, mut node) in self.nodes.iter().enumerate() {
-      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0  {
+      if !matches!(node.kind, NodeKind::Scc(_)) && node.obj > 0 {
         var_buf.clear();
         var_buf.push(self.var_from_node_id(n));
         while let Some(p) = node.active_pred {
@@ -218,7 +258,6 @@ impl<E: EdgeLookup> Graph<E> {
     Ok(())
   }
 
-
   /// Returns the objective contribution of the tree, and for each edge constraint in the tree, returns:
   /// 1. The edge (v1, v2)
   /// 2. The total subtree objective of the subtree rooted at v2, assuming all constraints in the MRS hold.
@@ -226,29 +265,47 @@ impl<E: EdgeLookup> Graph<E> {
   ///    and all other constraints in the MRS hold.
   ///
   /// Does *NOT* account for constraints which are not in the MRS.
-  pub fn edge_sensitivity_analysis(&self, mrs: &MrsTree) -> (Weight, Vec<((Var, Var), Weight, Weight)>) {
+  pub fn edge_sensitivity_analysis(
+    &self,
+    mrs: &MrsTree,
+  ) -> (Weight, Vec<((Var, Var), Weight, Weight)>) {
     // optimal solution for whole tree
-    let mut cum_obj_full_tree: Vec<Weight> = mrs.nodes.iter().map(|n| self.nodes[n.node].x).collect();
+    let mut cum_obj_full_tree: Vec<Weight> =
+      mrs.nodes.iter().map(|n| self.nodes[n.node].x).collect();
     // traverse in reverse topological order
     for (i, node) in mrs.nodes.iter().enumerate().rev() {
-      cum_obj_full_tree[i] = node.obj * cum_obj_full_tree[i] +
-        (node.children_start..node.children_end).map(|j| cum_obj_full_tree[j]).sum::<Weight>();
+      cum_obj_full_tree[i] = node.obj * cum_obj_full_tree[i]
+        + (node.children_start..node.children_end)
+          .map(|j| cum_obj_full_tree[j])
+          .sum::<Weight>();
     }
     // cum_obj_full_tree[i] now holds the cumulative subtree objective (coeff * variable value) at node i
 
     let mut solution_buf = vec![Weight::MAX; mrs.nodes.len()];
 
-    let edge_obj_diff = mrs.nodes.iter().enumerate().skip(1)
+    let edge_obj_diff = mrs
+      .nodes
+      .iter()
+      .enumerate()
+      .skip(1)
       .map(|(i, node)| {
         let parent_node = &mrs.nodes[node.parent_idx];
         mrs.forward_label_subtree(&mut solution_buf, i);
-        let cum_obj_subtree = solution_buf[i] * node.obj +
-          solution_buf[node.children_start..node.subtree_end].iter()
+        let cum_obj_subtree = solution_buf[i] * node.obj
+          + solution_buf[node.children_start..node.subtree_end]
+            .iter()
             .zip(&mrs.nodes[node.children_start..node.subtree_end])
             .map(|(&t, n)| t * n.obj)
             .sum::<Weight>();
         debug_assert!(cum_obj_subtree <= cum_obj_full_tree[i]);
-        ((self.var_from_node_id(parent_node.node), self.var_from_node_id(node.node)), cum_obj_full_tree[i], cum_obj_subtree)
+        (
+          (
+            self.var_from_node_id(parent_node.node),
+            self.var_from_node_id(node.node),
+          ),
+          cum_obj_full_tree[i],
+          cum_obj_subtree,
+        )
       })
       .collect();
 
@@ -260,27 +317,34 @@ impl<E: EdgeLookup> Graph<E> {
     self.compute_scc_active_edges();
     let mut is_in_mrs = vec![false; self.nodes.len()];
 
-    let roots: Vec<usize> = self.nodes.iter().enumerate()
-      .filter_map(|(n, node)|
+    let roots: Vec<usize> = self
+      .nodes
+      .iter()
+      .enumerate()
+      .filter_map(|(n, node)| {
         if node.obj == 0 || matches!(node.kind, NodeKind::Scc(_)) {
           None
         } else {
           self.mark_path_to_mrs_root(&mut is_in_mrs, n, node)
         }
-      )
+      })
       .collect();
 
-    #[cfg(feature = "viz-extra")] {
+    #[cfg(feature = "viz-extra")]
+    {
       self.viz_data.clear_highlighted();
     }
 
-    let forest = roots.into_iter()
+    let forest = roots
+      .into_iter()
       .map(|r| {
         let tree = MrsTree::build(self, &is_in_mrs, r);
-        #[cfg(feature = "viz-extra")] {
-          self.viz_data.highlighted_edges.extend(
-            tree.edge_constraints().map(|(vi, vj)| (vi.node, vj.node))
-          );
+        #[cfg(feature = "viz-extra")]
+        {
+          self
+            .viz_data
+            .highlighted_edges
+            .extend(tree.edge_constraints().map(|(vi, vj)| (vi.node, vj.node)));
           self.viz_data.highlighted_nodes.insert(r);
         }
         tree
@@ -288,7 +352,6 @@ impl<E: EdgeLookup> Graph<E> {
       .collect();
     Ok(forest)
   }
-
 
   /// Marks the path to the MRS root, returning the root if the root has never been visited and None if it has.
   fn mark_path_to_mrs_root(&self, is_in_mrs: &mut [bool], n: usize, node: &Node) -> Option<usize> {
@@ -303,7 +366,6 @@ impl<E: EdgeLookup> Graph<E> {
       None
     }
   }
-
 
   /// This one's a doozy.
   ///
@@ -327,7 +389,8 @@ impl<E: EdgeLookup> Graph<E> {
   /// `b(i) --> c`, where `b(i)` is the original edge from the SCC to `c`.
   ///
   /// Once this transformation is done, we have a spanning forest of the original, non-SCC nodes.
-  fn compute_scc_active_edges(&mut self) { // FIXME should be a check to ensure this is only called once (Maybe a new model state)
+  fn compute_scc_active_edges(&mut self) {
+    // FIXME should be a check to ensure this is only called once (Maybe a new model state)
     if matches!(self.state, ModelState::Mrs) {
       return;
     }
@@ -338,7 +401,7 @@ impl<E: EdgeLookup> Graph<E> {
         Some(p) => match self.edges.find_edge(p, scc.scc_node).kind {
           EdgeKind::SccIn(n) => (n, Some(p)),
           EdgeKind::SccToScc { from: p, to: n } => (n, Some(p)),
-          _ => unreachable!()
+          _ => unreachable!(),
         },
         // The fake SCC node *is* the root
         None => (scc.lb_node, None), // node in the SCC with the max LB
@@ -371,18 +434,17 @@ impl<E: EdgeLookup> Graph<E> {
   }
 }
 
-
 #[cfg(test)]
 mod tests {
   #[macro_use]
   use crate::*;
   use super::*;
-  use crate::test::{*, strategy::*};
-  use SolveStatus::*;
-  use InfKind::*;
-  use proptest::prelude::*;
   use crate::graph::SolveStatus;
+  use crate::test::{strategy::*, *};
   use fnv::FnvHashMap;
+  use proptest::prelude::*;
+  use InfKind::*;
+  use SolveStatus::*;
 
   #[graph_proptest]
   #[input(acyclic_graph(
@@ -426,15 +488,19 @@ mod tests {
   fn build_minimal_graph(tree: &MrsTree) -> (FnvHashMap<(Var, Var), (Var, Var)>, Graph) {
     let mut g = Graph::new();
 
-    let vars: Vec<_> =
-      tree.nodes.iter()
-        .map(|n| g.add_var(n.obj, n.lb, Weight::MAX))
-        .collect();
+    let vars: Vec<_> = tree
+      .nodes
+      .iter()
+      .map(|n| g.add_var(n.obj, n.lb, Weight::MAX))
+      .collect();
 
     let mut g = g.finish_nodes();
 
-    let constraints: FnvHashMap<_, _> = tree.nodes.iter()
-      .enumerate().skip(1)
+    let constraints: FnvHashMap<_, _> = tree
+      .nodes
+      .iter()
+      .enumerate()
+      .skip(1)
       .map(|(j, n)| {
         let vi = vars[n.parent_idx];
         let vj = vars[j];
@@ -472,7 +538,13 @@ mod tests {
         let status = subgraph_without_e.solve();
         prop_assert_matches!(status, SolveStatus::Optimal);
         let total_obj_without_e = subgraph_without_e.compute_obj().unwrap();
-        prop_assert_eq!(obj_with_e - obj_without_e, total_obj_mrs - total_obj_without_e, "removing edge {} -> {}", vi.node, vj.node);
+        prop_assert_eq!(
+          obj_with_e - obj_without_e,
+          total_obj_mrs - total_obj_without_e,
+          "removing edge {} -> {}",
+          vi.node,
+          vj.node
+        );
       }
     }
     prop_assert_eq!(computed_obj, total_obj);
@@ -481,7 +553,7 @@ mod tests {
 
   #[graph_test]
   #[input("tree.f")]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input("multiple-sccs-mrs.f")]
   fn sa_testcases(g: &mut Graph) -> GraphTestResult {
     sensitivity_analysis(g).into_graph_test()
@@ -495,7 +567,6 @@ mod tests {
   fn sa_proptests(g: &mut Graph) -> GraphProptestResult {
     sensitivity_analysis(g)
   }
-
 
   #[graph_proptest]
   #[input(acyclic_graph(

@@ -1,23 +1,20 @@
 use crate::graph::*;
-use fnv::{FnvHashSet, FnvHashMap};
-use crate::{set_with_capacity, Error, map_with_capacity};
-use std::iter::once;
-use std::collections::VecDeque;
 use crate::iis::Iis;
 use crate::scc::{BoundInfeas, SccInfo};
+use crate::{map_with_capacity, set_with_capacity, Error};
+use fnv::{FnvHashMap, FnvHashSet};
+use std::collections::VecDeque;
+use std::iter::once;
 
 mod enumeration;
 mod shortest_path;
 pub use shortest_path::ShortestPathAlg;
-
 
 enum CyclicInfKind {
   Pure,
   Unknown,
   Bounds(BoundInfeas),
 }
-
-
 
 trait FindCyclicIis<A> {
   fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis;
@@ -37,7 +34,7 @@ impl<E: EdgeLookup> Graph<E> {
 }
 
 pub struct SccHandle<'a> {
-  scc: &'a SccInfo
+  scc: &'a SccInfo,
 }
 
 //

@@ -1,18 +1,18 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use fnv::{FnvHashSet, FnvHashMap};
-use std::hash::Hash;
-use crate::graph::EdgeKind::{SccOut, SccIn, SccToScc};
-use crate::{set_with_capacity, ModelAction, ModelState};
+use crate::graph::EdgeKind::{SccIn, SccOut, SccToScc};
 use crate::iis::Iis;
 use crate::scc::SccInfo;
+use crate::{set_with_capacity, ModelAction, ModelState};
+use fnv::{FnvHashMap, FnvHashSet};
+use std::hash::Hash;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use std::cmp::min;
-use std::option::Option::Some;
-use std::iter::{ExactSizeIterator, Map};
+pub use crate::edge_storage::EdgeLookup;
+use crate::edge_storage::{AdjacencyList, BuildEdgeStorage, EdgeDir};
 use crate::graph::ModelState::Unsolved;
-use std::borrow::{Cow, Borrow};
-use crate::edge_storage::{AdjacencyList, EdgeDir, BuildEdgeStorage};
-pub use crate::edge_storage::{EdgeLookup};
+use std::borrow::{Borrow, Cow};
+use std::cmp::min;
+use std::iter::{ExactSizeIterator, Map};
+use std::option::Option::Some;
 
 pub type Weight = i64;
 pub(crate) type NodeIdx = usize;
@@ -28,7 +28,6 @@ pub enum SolveStatus {
   Infeasible(InfKind),
   Optimal,
 }
-
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EdgeKind {
@@ -46,7 +45,6 @@ pub struct Edge {
   /// used for MRS calculation
   pub(crate) kind: EdgeKind,
 }
-
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Constraint {
@@ -82,9 +80,13 @@ impl NodeKind {
     self.is_scc()
   }
 
-  pub(crate) fn is_scc_member(&self) -> bool { matches!(self, NodeKind::SccMember(_)) }
+  pub(crate) fn is_scc_member(&self) -> bool {
+    matches!(self, NodeKind::SccMember(_))
+  }
 
-  pub(crate) fn is_scc(&self) -> bool { matches!(self, NodeKind::Scc(_)) }
+  pub(crate) fn is_scc(&self) -> bool {
+    matches!(self, NodeKind::Scc(_))
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -110,12 +112,14 @@ impl Node {
   }
 }
 
-
 pub(crate) trait GraphId {
   fn graph_id(&self) -> u32;
 
   fn var_from_node_id(&self, node: NodeIdx) -> Var {
-    Var { node, graph_id: self.graph_id() }
+    Var {
+      node,
+      graph_id: self.graph_id(),
+    }
   }
 
   fn check_graph_id<T: GraphId>(&self, b: &T) -> Result<(), crate::Error> {
@@ -126,7 +130,6 @@ pub(crate) trait GraphId {
     }
   }
 }
-
 
 macro_rules! impl_graphid {
   ([$($x:tt)*] $($y:tt)*) => {
@@ -143,7 +146,9 @@ macro_rules! impl_graphid {
 }
 
 impl GraphId for Var {
-  fn graph_id(&self) -> u32 { self.graph_id }
+  fn graph_id(&self) -> u32 {
+    self.graph_id
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -156,9 +161,8 @@ pub struct Graph<E = AdjacencyList<Vec<Edge>>> {
   first_scc_node: usize,
   // FIXME make sure this is kept up-to-date
   #[cfg(feature = "viz-extra")]
-  pub(crate) viz_data: crate::viz::VizData
+  pub(crate) viz_data: crate::viz::VizData,
 }
-
 
 pub struct GraphNodesBuilder<E> {
   _edges: std::marker::PhantomData<E>,
@@ -167,7 +171,6 @@ pub struct GraphNodesBuilder<E> {
 }
 
 impl_graphid!([E] GraphNodesBuilder<E>);
-
 
 impl<E: EdgeLookup> GraphNodesBuilder<E> {
   pub fn add_var(&mut self, obj: Weight, lb: Weight, ub: Weight) -> Var {
@@ -195,7 +198,6 @@ pub struct GraphEdgesBuilder<E: EdgeLookup> {
 }
 
 impl_graphid!([E: EdgeLookup] GraphEdgesBuilder<E>);
-
 
 impl<E: EdgeLookup> GraphEdgesBuilder<E> {
   pub fn num_edges_hint(&mut self, num_edges: usize) {
@@ -231,7 +233,6 @@ impl<E: EdgeLookup> GraphEdgesBuilder<E> {
 // once it's been finalised, not more adding of edges/nodes.  Only modification allowed is to remove
 // an edge.
 
-
 impl_graphid!([E] Graph<E>);
 
 impl<E: EdgeLookup> Graph<E> {
@@ -244,15 +245,15 @@ impl<E: EdgeLookup> Graph<E> {
     }
   }
 
-
   fn update(&mut self) {
     if let ModelState::Dirty { rebuild_sccs } = &self.state {
       let should_remove = if *rebuild_sccs {
-        Some(|edge: &Edge| matches!(&edge.kind,
-            EdgeKind::SccIn(_)
-            | EdgeKind::SccOut(_)
-            | EdgeKind::SccToScc { .. }
-        ))
+        Some(|edge: &Edge| {
+          matches!(
+            &edge.kind,
+            EdgeKind::SccIn(_) | EdgeKind::SccOut(_) | EdgeKind::SccToScc { .. }
+          )
+        })
       } else {
         None
       };
@@ -267,7 +268,6 @@ impl<E: EdgeLookup> Graph<E> {
       self.state = Unsolved;
     }
   }
-
 
   pub fn remove_iis(&mut self, iis: &Iis) {
     self.check_rebuild_sccs_batch(iis.iter_edges());
@@ -294,15 +294,13 @@ impl<E: EdgeLookup> Graph<E> {
 
     let rebuild_sccs = {
       let from_node = &self.nodes[from];
-      matches!(&from_node.kind, &NodeKind::SccMember(_)) &&
-        &from_node.kind == &self.nodes[to].kind
+      matches!(&from_node.kind, &NodeKind::SccMember(_)) && &from_node.kind == &self.nodes[to].kind
     };
     self.state = ModelState::Dirty { rebuild_sccs };
     rebuild_sccs
   }
 
-
-  fn check_rebuild_sccs_batch(&mut self, edges: impl Iterator<Item=(NodeIdx, NodeIdx)>) {
+  fn check_rebuild_sccs_batch(&mut self, edges: impl Iterator<Item = (NodeIdx, NodeIdx)>) {
     for (from, to) in edges {
       if self.check_rebuild_sccs(from, to) {
         break;
@@ -316,15 +314,22 @@ impl<E: EdgeLookup> Graph<E> {
       self.state = state;
     } else {
       let sccs = self.find_sccs();
-      let inf_idx = sccs.iter().enumerate()
+      let inf_idx = sccs
+        .iter()
+        .enumerate()
         .find(|(_, scc)| !self.scc_is_feasible(scc))
         .map(|(idx, _)| idx);
 
       self.state = if let Some(inf_idx) = inf_idx {
-        ModelState::InfCycle { sccs, first_inf_scc: inf_idx }
+        ModelState::InfCycle {
+          sccs,
+          first_inf_scc: inf_idx,
+        }
       } else {
         self.condense(sccs);
-        self.forward_label().expect("second forward labelling should not find cycles")
+        self
+          .forward_label()
+          .expect("second forward labelling should not find cycles")
       };
     }
     let status = match &self.state {
@@ -333,7 +338,8 @@ impl<E: EdgeLookup> Graph<E> {
       ModelState::Optimal => SolveStatus::Optimal,
       ModelState::Unsolved | ModelState::Mrs | ModelState::Dirty { .. } => unreachable!(),
     };
-    #[cfg(feature= "viz-extra")] {
+    #[cfg(feature = "viz-extra")]
+    {
       self.viz_data.last_solve = Some(status);
     }
     status
@@ -352,9 +358,7 @@ impl<E: EdgeLookup> Graph<E> {
     Ok(obj)
   }
 
-
-  pub fn get_solution(&self, var: &Var) -> Result<Weight, crate::Error>
-  {
+  pub fn get_solution(&self, var: &Var) -> Result<Weight, crate::Error> {
     self.check_allowed_action(ModelAction::ComputeOptimalityInfo)?;
     self.check_graph_id(var)?;
     Ok(self.nodes[var.node].x)
@@ -390,10 +394,8 @@ impl<E: EdgeLookup> Graph<E> {
       }
     }
 
-
     // Solve - traverse DAG in topologically-sorted order
     // let nodes = &self.nodes;
-
 
     while let Some(i) = queue.pop() {
       let node = &self.nodes[i];
@@ -431,7 +433,6 @@ impl<E: EdgeLookup> Graph<E> {
         }
       }
 
-
       Some(ModelState::Optimal)
     }
   }
@@ -457,17 +458,17 @@ mod tests {
   use super::*;
   use crate::test::*;
   // use crate::viz::*;
-  use SolveStatus::*;
   use InfKind::*;
+  use SolveStatus::*;
 
   #[graph_test]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input("k4.f", vec![0; 4])]
   #[input("k8.f", vec![0; 8])]
   #[input("simple.f", vec![0, 2, 4])]
-  #[config(layout="dot")]
+  #[config(layout = "dot")]
   #[input("multiple-sccs.f", vec![0, 0, 7, 2, 2, 2, 2, 6, 6, 6])]
-  #[config(sccs="hide")]
+  #[config(sccs = "hide")]
   #[input("simple-cycle.f", vec![1, 1, 1, 1, 0, 2])]
   fn solve_feasible(g: &mut Graph, solution: Vec<Weight>) -> GraphTestResult {
     if matches!(g.solve(), SolveStatus::Infeasible(_)) {

@@ -4,12 +4,12 @@
 #![allow(warnings)]
 mod graph;
 
-pub use graph::{Var, Constraint, Graph, SolveStatus, Weight, InfKind};
+pub use graph::{Constraint, Graph, InfKind, SolveStatus, Var, Weight};
 
+mod iis;
 pub mod mrs;
 #[cfg(any(test, feature = "viz"))]
 pub mod viz;
-mod iis;
 pub use iis::Iis;
 
 mod error;
@@ -19,8 +19,8 @@ pub(crate) use model_states::*;
 #[cfg(test)]
 pub mod test;
 
-mod scc;
 pub mod edge_storage;
+mod scc;
 
 pub use error::*;
 use std::iter::FusedIterator;
@@ -54,7 +54,7 @@ impl<T: Copy, const N: usize> Iterator for ArrayIntoIter<T, N> {
         self.pos += 1;
         some
       }
-      None => None
+      None => None,
     }
   }
 
@@ -72,17 +72,15 @@ impl<T: Copy, const N: usize> Iterator for ArrayIntoIter<T, N> {
 impl<T: Copy, const N: usize> ExactSizeIterator for ArrayIntoIter<T, N> {}
 impl<T: Copy, const N: usize> FusedIterator for ArrayIntoIter<T, N> {}
 
-
 #[cfg(all(test, feature = "test-helpers"))]
 mod test_helpers {
-  use crate::{test, Graph, SolveStatus::*};
   use crate::test::GraphData;
-  use anyhow::Context;
   use crate::viz::GraphViz;
+  use crate::{test, Graph, SolveStatus::*};
+  use anyhow::Context;
 
   #[test]
   fn mark_failed_as_regression() -> anyhow::Result<()> {
-      test::mark_failed_as_regression()
+    test::mark_failed_as_regression()
   }
 }
-

@@ -1,6 +1,6 @@
 use super::*;
-use crate::iis::Iis;
 use crate::edge_storage::{ForwardDir, Neighbours};
+use crate::iis::Iis;
 
 pub enum Enumeration {}
 
@@ -10,10 +10,12 @@ impl<E: EdgeLookup> FindCyclicIis<Enumeration> for Graph<E> {
   }
 
   fn find_smallest_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    self.iter_cyclic_iis(sccs.iter()).min_by_key(|iis| iis.len()).unwrap()
+    self
+      .iter_cyclic_iis(sccs.iter())
+      .min_by_key(|iis| iis.len())
+      .unwrap()
   }
 }
-
 
 #[derive(Copy, Clone, Debug)]
 struct StackVariables<I> {
@@ -43,9 +45,9 @@ pub struct CycleIter<'a, I, E: EdgeLookup> {
 }
 
 impl<'a, I, E> CycleIter<'a, I, E>
-  where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
-    E: EdgeLookup,
+where
+  I: 'a + Iterator<Item = &'a FnvHashSet<usize>>,
+  E: EdgeLookup,
 {
   fn no_cycle(&mut self, x: usize, y: usize) {
     // println!("block({} -> {}), {:?}", x, y, &self.current_path);
@@ -56,7 +58,8 @@ impl<'a, I, E> CycleIter<'a, I, E>
   fn unmark(&mut self, y: usize) {
     self.marked[y] = false;
     // println!("unmark({}), {:?}", y, &self.current_path);
-    for x in self.blocked_pred[y].clone() { // TODO can we avoid the clone here?
+    for x in self.blocked_pred[y].clone() {
+      // TODO can we avoid the clone here?
       let removed = self.blocked_succ[x].remove(&y);
       debug_assert!(removed);
       if self.marked[x] {
@@ -99,7 +102,11 @@ impl<'a, I, E> CycleIter<'a, I, E>
 
   /// Push to the stack, and do the stuff that happens before the main loop
   fn pre_loop(&mut self, v: usize) {
-    self.local_variables.push(StackVariables { cycle_found: false, v, edges_from_v: self.graph.edges.successors(v) });
+    self.local_variables.push(StackVariables {
+      cycle_found: false,
+      v,
+      edges_from_v: self.graph.edges.successors(v),
+    });
     self.marked[v] = true;
     debug_assert_eq!(self.current_path_pos[v], usize::MAX);
     self.current_path_pos[v] = self.current_path.len();
@@ -122,7 +129,8 @@ impl<'a, I, E> CycleIter<'a, I, E>
       if !self.marked[w] {
         // Recursive call begins
         self.pre_loop(w); // stack push
-        if let Some(cycle) = self.neighbours_loop() { // recurse - callee will run post-loop
+        if let Some(cycle) = self.neighbours_loop() {
+          // recurse - callee will run post-loop
           self.local_variables[sp].cycle_found = true; // don't pop stack - inner call might emit more
           return Some(cycle);
         }
@@ -159,11 +167,10 @@ impl<'a, I, E> CycleIter<'a, I, E>
   }
 }
 
-
 impl<'a, I, E> Iterator for CycleIter<'a, I, E>
-  where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
-    E: EdgeLookup,
+where
+  I: 'a + Iterator<Item = &'a FnvHashSet<usize>>,
+  E: EdgeLookup,
 {
   type Item = Vec<usize>;
 
@@ -193,12 +200,11 @@ pub struct CyclicIisIter<'a, I, E: EdgeLookup> {
 }
 
 impl<'a, I, E> CyclicIisIter<'a, I, E>
-  where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
-    E: EdgeLookup,
+where
+  I: 'a + Iterator<Item = &'a FnvHashSet<usize>>,
+  E: EdgeLookup,
 {
-  fn new(graph: &'a Graph<E>, sccs: I, one_iis_per_scc: bool) -> Self
-  {
+  fn new(graph: &'a Graph<E>, sccs: I, one_iis_per_scc: bool) -> Self {
     CyclicIisIter {
       cycle_iter: CycleIter::new(graph, sccs, false),
       one_iis_per_scc,
@@ -208,9 +214,9 @@ impl<'a, I, E> CyclicIisIter<'a, I, E>
 }
 
 impl<'a, I, E> Iterator for CyclicIisIter<'a, I, E>
-  where
-    I: 'a + Iterator<Item=&'a FnvHashSet<usize>>,
-    E: EdgeLookup,
+where
+  I: 'a + Iterator<Item = &'a FnvHashSet<usize>>,
+  E: EdgeLookup,
 {
   type Item = Iis;
 
@@ -302,36 +308,42 @@ impl<E: EdgeLookup> Graph<E> {
   }
 
   fn iter_cycles<'a, I>(&'a self, sccs: I) -> CycleIter<'a, I::IntoIter, E>
-    where
-      I: IntoIterator<Item=&'a FnvHashSet<usize>>,
-      I::IntoIter: 'a,
+  where
+    I: IntoIterator<Item = &'a FnvHashSet<usize>>,
+    I::IntoIter: 'a,
   {
     CycleIter::new(self, sccs.into_iter(), false)
   }
 
   fn iter_cyclic_iis<'a, I>(&'a self, sccs: I) -> CyclicIisIter<'a, I::IntoIter, E>
-    where
-      I: IntoIterator<Item=&'a FnvHashSet<usize>>,
-      I::IntoIter: 'a,
+  where
+    I: IntoIterator<Item = &'a FnvHashSet<usize>>,
+    I::IntoIter: 'a,
   {
     CyclicIisIter::new(self, sccs.into_iter(), false)
   }
 }
 
-
 #[cfg(test)]
 mod tests {
   use super::*;
-  use proptest::prelude::*;
-  use crate::test::*;
   use crate::test::strategy::*;
+  use crate::test::*;
   use crate::*;
+  use proptest::prelude::*;
 
-  fn check_iis_and_cycles_counts(g: &mut Graph, n_iis: u128, n_cycles: u128) -> GraphProptestResult {
+  fn check_iis_and_cycles_counts(
+    g: &mut Graph,
+    n_iis: u128,
+    n_cycles: u128,
+  ) -> GraphProptestResult {
     let num_nodes = g.nodes.len();
     g.solve();
     let (sccs, first_inf_scc) = match &g.state {
-      ModelState::InfCycle { sccs, first_inf_scc } => (&*sccs, *first_inf_scc),
+      ModelState::InfCycle {
+        sccs,
+        first_inf_scc,
+      } => (&*sccs, *first_inf_scc),
       _ => return Err(TestCaseError::fail("should find infeasible cycles")),
     };
     prop_assert_eq!(g.sccs.len(), 0, "SCCs should only be present when feasible");
@@ -344,7 +356,7 @@ mod tests {
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(graph_with_conn(default_nodes(2..1000), Cycle::new(), any_edge_weight()))]
   fn count_cycles_and_iis_cycle_graph(g: &mut Graph) -> GraphProptestResult {
     let n_iis = if g.edges.all_edges().any(|e| e.weight != 0) {
@@ -356,7 +368,7 @@ mod tests {
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(set_arbitrary_edge_to_one(complete_graph_zero_edges(default_nodes(2..=8))))]
   fn count_cycles_and_iis_complete_graph(g: &mut Graph) -> GraphProptestResult {
     let n = g.nodes.len();
@@ -380,7 +392,8 @@ mod tests {
       let mut total = 0u128;
       for k in 2..=n {
         let mut prod = 1;
-        for i in (n - k + 1)..=(n - 2) { // may be empty if k == 2
+        for i in (n - k + 1)..=(n - 2) {
+          // may be empty if k == 2
           prod *= i as u128;
         }
         total += prod;

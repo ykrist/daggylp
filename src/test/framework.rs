@@ -1,26 +1,24 @@
-use std::path::{PathBuf, Path};
 use std::borrow::Cow;
-use std::sync::mpsc;
 use std::ffi::OsString;
-use std::marker::PhantomData;
 use std::fmt;
+use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use proptest::prelude::*;
-use proptest::test_runner::{TestError, FileFailurePersistence, TestRunner as PropTestRunner};
+use proptest::test_runner::{FileFailurePersistence, TestError, TestRunner as PropTestRunner};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::viz::{GraphViz, SccViz, VizConfig};
-use crate::graph::Graph;
-use crate::test::strategy::SccKind;
-use crate::iis::Iis;
 use super::*;
+use crate::graph::Graph;
+use crate::iis::Iis;
+use crate::test::strategy::SccKind;
+use crate::viz::{GraphViz, SccViz, VizConfig};
 
-pub use daggylp_macros::{graph_test, graph_proptest};
-pub use strategy::SharableStrategy;
+pub use daggylp_macros::{graph_proptest, graph_test};
 pub use data::*;
-
-
+pub use strategy::SharableStrategy;
 
 pub fn get_test_id(module_path: &str, ident: &str) -> String {
   let mut s = String::with_capacity(module_path.len());
@@ -35,7 +33,6 @@ pub fn get_test_id(module_path: &str, ident: &str) -> String {
   s.push_str(ident);
   s
 }
-
 
 fn is_unit_ty<M: 'static>() -> bool {
   use std::any::TypeId;
@@ -69,11 +66,17 @@ impl TestManifest {
       GraphTestMode::Proptest => {
         let input_prefix = test_id.to_string();
         let output_prefix = input_prefix.clone();
-        (test_failures_dir().to_path_buf(), input_prefix, output_prefix)
+        (
+          test_failures_dir().to_path_buf(),
+          input_prefix,
+          output_prefix,
+        )
       }
-      GraphTestMode::Debug => {
-        (test_failures_dir().to_path_buf(), test_id.to_string(), format!("{}.debug", test_id))
-      }
+      GraphTestMode::Debug => (
+        test_failures_dir().to_path_buf(),
+        test_id.to_string(),
+        format!("{}.debug", test_id),
+      ),
     };
     path.push(format!("{}.manifest.json", &input_prefix));
 
@@ -88,8 +91,8 @@ impl TestManifest {
 
   fn from_file(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
     let path = path.into();
-    let contents = std::fs::read_to_string(&path)
-      .with_context(|| format!("read manifest {:?}", &path))?;
+    let contents =
+      std::fs::read_to_string(&path).with_context(|| format!("read manifest {:?}", &path))?;
     let mut manifest: Self = serde_json::from_str(&contents)?;
     manifest.path = path;
     Ok(manifest)
@@ -135,12 +138,16 @@ impl TestManifest {
   }
 
   fn write_input_graph(&self, g: &GraphData, config: VizConfig) -> anyhow::Result<()> {
-    g.viz().configure(config).render(self.path.with_file_name(&self.input_graph));
+    g.viz()
+      .configure(config)
+      .render(self.path.with_file_name(&self.input_graph));
     Ok(())
   }
 
   fn write_output_graph(&self, g: &Graph, config: VizConfig) -> anyhow::Result<()> {
-    g.viz().configure(config).render(self.path.with_file_name(&self.output_graph));
+    g.viz()
+      .configure(config)
+      .render(self.path.with_file_name(&self.output_graph));
     Ok(())
   }
 
@@ -153,8 +160,8 @@ impl TestManifest {
       return Ok(meta);
     }
     let path = self.path.with_file_name(&self.meta);
-    let contents = std::fs::read_to_string(&path)
-      .with_context(|| format!("read meta from file {:?}", &path))?;
+    let contents =
+      std::fs::read_to_string(&path).with_context(|| format!("read meta from file {:?}", &path))?;
     Ok(serde_json::from_str(&contents)?)
   }
 }
@@ -187,7 +194,9 @@ pub trait GraphProptest: Sized + Copy + Send + Sync + 'static {
   type Meta: Serialize + DeserializeOwned + 'static;
   type SValue: Send + 'static;
 
-  fn constant_meta() -> Option<Self::Meta> { None }
+  fn constant_meta() -> Option<Self::Meta> {
+    None
+  }
 
   fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta);
 
@@ -198,20 +207,28 @@ impl GraphProptest for SimpleTest<GraphProptestResult> {
   type Meta = ();
   type SValue = GraphData;
 
-  fn constant_meta() -> Option<()> { Some(()) }
+  fn constant_meta() -> Option<()> {
+    Some(())
+  }
 
-  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { (sval, ()) }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) {
+    (sval, ())
+  }
 
   fn run(&self, graph: &mut Graph, _: &GraphData, _: Self::Meta) -> GraphProptestResult {
     self.0(graph)
   }
 }
 
-impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest for TestWithMeta<GraphProptestResult, M> {
+impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest
+  for TestWithMeta<GraphProptestResult, M>
+{
   type Meta = M;
   type SValue = (GraphData, M);
 
-  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { sval }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) {
+    sval
+  }
 
   fn run(&self, graph: &mut Graph, _: &GraphData, meta: Self::Meta) -> GraphProptestResult {
     self.0(graph, meta)
@@ -222,21 +239,28 @@ impl GraphProptest for TestWithData<GraphProptestResult> {
   type Meta = ();
   type SValue = GraphData;
 
-  fn constant_meta() -> Option<()> { Some(()) }
+  fn constant_meta() -> Option<()> {
+    Some(())
+  }
 
-  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { (sval, ()) }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) {
+    (sval, ())
+  }
 
   fn run(&self, graph: &mut Graph, data: &GraphData, _: Self::Meta) -> GraphProptestResult {
     self.0(graph, data)
   }
 }
 
-
-impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest for ComplexTest<GraphProptestResult, M> {
+impl<M: Serialize + DeserializeOwned + Send + 'static> GraphProptest
+  for ComplexTest<GraphProptestResult, M>
+{
   type Meta = M;
   type SValue = (GraphData, M);
 
-  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) { sval }
+  fn split_input(sval: Self::SValue) -> (GraphData, Self::Meta) {
+    sval
+  }
 
   fn run(&self, graph: &mut Graph, data: &GraphData, meta: Self::Meta) -> GraphProptestResult {
     self.0(graph, data, meta)
@@ -292,7 +316,11 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
     }
 
     if self.run_count > 0 {
-      println!("Strategy #{} triggered a failure ({} previous runs)", self.run_count + 1, self.run_count)
+      println!(
+        "Strategy #{} triggered a failure ({} previous runs)",
+        self.run_count + 1,
+        self.run_count
+      )
     }
 
     match result {
@@ -308,19 +336,23 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
         manifest.write_input_graph(&input, self.viz_config).unwrap();
         manifest.write_meta::<F>(&meta).unwrap();
         let mut graph = input.build();
-        manifest.write_output_graph(&graph, self.viz_config).unwrap();
+        manifest
+          .write_output_graph(&graph, self.viz_config)
+          .unwrap();
         self.test.run(&mut graph, &input, meta).ok();
-        manifest.write_output_graph(&graph, self.viz_config).unwrap();
+        manifest
+          .write_output_graph(&graph, self.viz_config)
+          .unwrap();
         eprintln!("{}", reason.message());
         panic!("test case failure");
       }
-      Ok(()) => unreachable!()
+      Ok(()) => unreachable!(),
     }
   }
 
   pub fn run<S>(&mut self, strategy: S)
-    where
-      S: SharableStrategy<Value=F::SValue>,
+  where
+    S: SharableStrategy<Value = F::SValue>,
   {
     if !self.skip_regressions {
       self.run_regressions();
@@ -348,30 +380,34 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
   }
 
   fn run_parallel<S>(&self, strategy: S)
-    where
-      S: SharableStrategy<Value=F::SValue>,
+  where
+    S: SharableStrategy<Value = F::SValue>,
   {
     use std::sync::mpsc;
     use TestError::*;
 
     if self.deterministic {
-      eprintln!("warning: running with multiple CPUS doesn't make sense, running non-deterministically.");
+      eprintln!(
+        "warning: running with multiple CPUS doesn't make sense, running non-deterministically."
+      );
     }
 
-    let worker_threads: Vec<_> = (0..self.cpus).map(|_| {
-      let config = self.config.clone();
-      let strategy = strategy.clone();
-      let test = self.test;
+    let worker_threads: Vec<_> = (0..self.cpus)
+      .map(|_| {
+        let config = self.config.clone();
+        let strategy = strategy.clone();
+        let test = self.test;
 
-      std::thread::spawn(move || {
-        let mut runner = PropTestRunner::new(config);
-        runner.run(&strategy, |input| {
-          let (mut graph_spec, meta) = F::split_input(input);
-          let mut g = graph_spec.build();
-          test.run(&mut g, &graph_spec, meta)
+        std::thread::spawn(move || {
+          let mut runner = PropTestRunner::new(config);
+          runner.run(&strategy, |input| {
+            let (mut graph_spec, meta) = F::split_input(input);
+            let mut g = graph_spec.build();
+            test.run(&mut g, &graph_spec, meta)
+          })
         })
       })
-    }).collect();
+      .collect();
 
     let mut test_result = None;
     let mut thread_panic = None;
@@ -397,7 +433,9 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
     self.skip_regressions = skip;
   }
 
-  pub fn deterministic(&mut self, det: bool) { self.deterministic = det; }
+  pub fn deterministic(&mut self, det: bool) {
+    self.deterministic = det;
+  }
 
   pub fn cpus(&mut self, cpus: u32) {
     assert!(cpus > 0);
@@ -416,7 +454,8 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
     let search_path = test_regressions_dir().join(&self.id);
     let mut search_path = search_path.into_os_string().into_string().unwrap();
     search_path.push_str("/*.manifest.json");
-    glob::glob(&search_path).unwrap()
+    glob::glob(&search_path)
+      .unwrap()
       .map(|p| {
         let idx = true_stem(&p?).unwrap().parse()?;
         Ok(self.manifest(GraphTestMode::Regression(idx)))
@@ -432,13 +471,11 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
     println!("finished running regressions")
   }
 
-  pub fn debug(&self)
-  {
+  pub fn debug(&self) {
     self.run_with_existing(self.manifest(GraphTestMode::Debug));
   }
 
-  fn run_with_existing(&self, manifest: TestManifest)
-  {
+  fn run_with_existing(&self, manifest: TestManifest) {
     let input = manifest.load_input().unwrap();
     let meta = manifest.load_meta::<F>().unwrap();
     let mut graph = input.build();
@@ -457,7 +494,6 @@ impl<F: GraphProptest> GraphProptestRunner<F> {
   }
 }
 
-
 pub type GraphTestResult = anyhow::Result<()>;
 
 pub trait GraphTest {
@@ -469,12 +505,13 @@ pub trait GraphTest {
   fn run(&self, graph: &mut Graph, data: &GraphData, input: Self::Meta) -> GraphTestResult;
 }
 
-
 impl GraphTest for SimpleTest<GraphTestResult> {
   type Meta = ();
   type TestInput = &'static str;
 
-  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) {
+    (raw, ())
+  }
 
   fn run(&self, graph: &mut Graph, _: &GraphData, _: Self::Meta) -> GraphTestResult {
     (self.0)(graph)
@@ -485,7 +522,9 @@ impl GraphTest for TestWithData<GraphTestResult> {
   type Meta = ();
   type TestInput = &'static str;
 
-  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { (raw, ()) }
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) {
+    (raw, ())
+  }
 
   fn run(&self, graph: &mut Graph, data: &GraphData, _: Self::Meta) -> GraphTestResult {
     (self.0)(graph, data)
@@ -496,7 +535,9 @@ impl<M: Clone> GraphTest for TestWithMeta<GraphTestResult, M> {
   type Meta = M;
   type TestInput = (&'static str, M);
 
-  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) {
+    raw
+  }
 
   fn run(&self, graph: &mut Graph, _: &GraphData, meta: Self::Meta) -> GraphTestResult {
     (self.0)(graph, meta)
@@ -507,7 +548,9 @@ impl<M: Clone> GraphTest for ComplexTest<GraphTestResult, M> {
   type Meta = M;
   type TestInput = (&'static str, M);
 
-  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) { raw }
+  fn split_meta(raw: Self::TestInput) -> (&'static str, Self::Meta) {
+    raw
+  }
 
   fn run(&self, graph: &mut Graph, data: &GraphData, meta: Self::Meta) -> GraphTestResult {
     (self.0)(graph, data, meta)
@@ -525,8 +568,7 @@ fn glob_graph_inputs(input_pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
   patt.push('/');
   patt.push_str(input_pattern);
   patt.push_str(".txt");
-  let paths : Result<Vec<_>, _> = glob::glob(&patt)?
-    .collect();
+  let paths: Result<Vec<_>, _> = glob::glob(&patt)?.collect();
   let paths = paths?;
   if paths.is_empty() {
     anyhow::bail!("no inputs matching pattern `{}` found", &patt)
@@ -543,8 +585,7 @@ impl<F: GraphTest> GraphTestRunner<F> {
     }
   }
 
-  pub fn run(&self, input: F::TestInput)
-  {
+  pub fn run(&self, input: F::TestInput) {
     std::fs::create_dir_all(test_testcase_failures_dir()).unwrap();
 
     let (input_patt, meta) = F::split_meta(input);
@@ -559,18 +600,20 @@ impl<F: GraphTest> GraphTestRunner<F> {
         data.viz().configure(self.viz_config).render(&path);
         path.set_file_name(format!("{}.output.svg", self.id));
         graph.viz().configure(self.viz_config).render(path);
-        eprintln!("test case failure (input {:?}):\n{:?}", input.file_stem().unwrap(), error);
+        eprintln!(
+          "test case failure (input {:?}):\n{:?}",
+          input.file_stem().unwrap(),
+          error
+        );
         panic!("test failed");
       }
     }
-
   }
 
   pub fn viz_config(&mut self) -> &mut VizConfig {
     &mut self.viz_config
   }
 }
-
 
 pub trait ResultConv {
   fn into_graph_test(self) -> GraphTestResult;
@@ -628,7 +671,6 @@ macro_rules! graph_testcase_assert_ne {
   }};
 }
 
-
 #[macro_export]
 macro_rules! prop_assert_matches {
     ($e:expr, $( $pattern:pat )|+ $( if $guard: expr )?) => {{
@@ -640,7 +682,6 @@ macro_rules! prop_assert_matches {
             e, patt_s);
     }};
 }
-
 
 pub trait PrettyUnwrap {
   type Value;
@@ -660,7 +701,6 @@ impl<T> PrettyUnwrap for anyhow::Result<T> {
   }
 }
 
-
 pub fn mark_failed_as_regression() -> anyhow::Result<()> {
   let mut pattern = test_failures_dir().to_str().unwrap().to_string();
   pattern.push_str("/*.manifest.json");
@@ -669,12 +709,15 @@ pub fn mark_failed_as_regression() -> anyhow::Result<()> {
     let p = p?;
     let test_id = true_stem(&p).unwrap();
     let src = TestManifest::from_file(&p).unwrap();
-    let mut patt = test_regressions_dir().join(test_id).into_os_string().into_string().unwrap();
+    let mut patt = test_regressions_dir()
+      .join(test_id)
+      .into_os_string()
+      .into_string()
+      .unwrap();
     patt.push_str("/*.manifest.json");
     let mut idx = 0;
     for file in glob::glob(&patt)? {
-      let existing_index = true_stem(&file?)
-        .map(|s| s.parse::<u32>().ok()).flatten();
+      let existing_index = true_stem(&file?).map(|s| s.parse::<u32>().ok()).flatten();
       if existing_index == Some(idx) {
         idx += 1;
       } else {
@@ -692,10 +735,7 @@ pub fn mark_failed_as_regression() -> anyhow::Result<()> {
 
 #[test]
 fn test_id_from_module_path() {
-  assert_eq!(
-    &get_test_id("daggylp::scc::tests", "foobar"),
-    "scc_foobar"
-  );
+  assert_eq!(&get_test_id("daggylp::scc::tests", "foobar"), "scc_foobar");
   assert_eq!(
     &get_test_id("daggylp::iis::cycles::enumeration::tests", "foobar"),
     "iis_cycles_enumeration_foobar"

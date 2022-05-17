@@ -1,6 +1,6 @@
-use crate::graph::*;
 use super::*;
-use crate::{map_with_capacity};
+use crate::graph::*;
+use crate::map_with_capacity;
 use fnv::FnvHashMap;
 
 fn update_min<T: Ord, U>(dst: &mut Option<(T, U)>, src: (T, U)) -> bool {
@@ -19,7 +19,6 @@ struct DpState {
   deadline: Weight,
 }
 
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 enum DpValueAction {
   /// Before the recursive call to compute value of `state[t+1]`, `state[t]` gets a
@@ -34,8 +33,8 @@ enum DpValueAction {
   Step(u32, DpState),
 }
 
-use DpValueAction::*;
 use crate::edge_storage::EdgeList;
+use DpValueAction::*;
 
 //      val            i     edge weight (i, j)
 ///                          j    deadline[j]
@@ -61,17 +60,16 @@ impl Iterator for DpShortestPath<'_> {
   type Item = usize;
 
   fn next(&mut self) -> Option<Self::Item> {
-    self.state.take()
-      .map(|state| {
-        let (path_len, next_state) = match self.dp_cache[&state] {
-          Terminate(l) => (l, None),
-          Step(l, s) => (l, Some(s)),
-          Pruned | CycleSentinel => unreachable!()
-        };
-        self.state = next_state;
-        self.path_len = path_len;
-        state.node
-      })
+    self.state.take().map(|state| {
+      let (path_len, next_state) = match self.dp_cache[&state] {
+        Terminate(l) => (l, None),
+        Step(l, s) => (l, Some(s)),
+        Pruned | CycleSentinel => unreachable!(),
+      };
+      self.state = next_state;
+      self.path_len = path_len;
+      state.node
+    })
   }
 
   fn size_hint(&self) -> (usize, Option<usize>) {
@@ -94,7 +92,10 @@ impl<E: EdgeLookup> Graph<E> {
       } else {
         (n, node)
       };
-      let initial_state = DpState { node: n, deadline: node.ub };
+      let initial_state = DpState {
+        node: n,
+        deadline: node.ub,
+      };
       match self.dp(&mut cache, initial_state) {
         Pruned => continue,
         Terminate(l) => {
@@ -132,10 +133,15 @@ impl<E: EdgeLookup> Graph<E> {
 
       let mut best_val_action = None;
 
-      for e in self.edges.predecessors(state.node)
+      for e in self
+        .edges
+        .predecessors(state.node)
         .filter(|e| matches!(&e.kind, EdgeKind::Regular))
       {
-        let new_state = DpState { node: e.from, deadline: state.deadline - e.weight };
+        let new_state = DpState {
+          node: e.from,
+          deadline: state.deadline - e.weight,
+        };
         let mut val = match self.dp(cache, new_state) {
           Pruned => continue,
           CycleSentinel => continue,
@@ -149,7 +155,7 @@ impl<E: EdgeLookup> Graph<E> {
 
       match best_val_action {
         None => DpValueAction::Pruned,
-        Some((val, new_state)) => DpValueAction::Step(val, new_state)
+        Some((val, new_state)) => DpValueAction::Step(val, new_state),
       }
     };
 
@@ -163,25 +169,29 @@ mod tests {
   use super::*;
   #[macro_use]
   use crate::*;
+  use crate::test::strategy::{any_bounds_nodes, default_nodes, node, MAX_EDGE_WEIGHT};
   use crate::test::*;
   use proptest::prelude::*;
-  use crate::test::strategy::{node, any_bounds_nodes, MAX_EDGE_WEIGHT, default_nodes};
 
   fn path_iis(path: Vec<usize>) -> Iis {
     let bounds = Some((*path.first().unwrap(), *path.last().unwrap()));
-    Iis { kind: InfKind::Path, bounds, edge_nodes: path, graph_id: u32::MAX }
+    Iis {
+      kind: InfKind::Path,
+      bounds,
+      edge_nodes: path,
+      graph_id: u32::MAX,
+    }
   }
 
-  fn graph_with_single_path_iis() -> impl SharableStrategy<Value=GraphData> {
-    strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0))
-      .prop_map(|mut g| {
-        g.nodes.first_mut().unwrap().lb = 1;
-        g.nodes.last_mut().unwrap().ub = 0;
-        g
-      })
+  fn graph_with_single_path_iis() -> impl SharableStrategy<Value = GraphData> {
+    strategy::connected_acyclic_graph(default_nodes(10..=100), Just(0)).prop_map(|mut g| {
+      g.nodes.first_mut().unwrap().lb = 1;
+      g.nodes.last_mut().unwrap().ub = 0;
+      g
+    })
   }
 
-  fn iis_graph() -> impl SharableStrategy<Value=GraphData> {
+  fn iis_graph() -> impl SharableStrategy<Value = GraphData> {
     strategy::connected_acyclic_graph(any_bounds_nodes(10..=100), 0..=MAX_EDGE_WEIGHT)
   }
 
@@ -197,7 +207,10 @@ mod tests {
     match status {
       SolveStatus::Infeasible(InfKind::Path) => {
         let new_iis = g.compute_iis(true);
-        prop_assert!(iis_size <= new_iis.len(), "second IIS should be smaller or the same size")
+        prop_assert!(
+          iis_size <= new_iis.len(),
+          "second IIS should be smaller or the same size"
+        )
       }
       SolveStatus::Infeasible(InfKind::Cycle) => {
         test_case_bail!("input graph should be acyclic")
@@ -221,7 +234,10 @@ mod tests {
   #[input(iis_graph())]
   fn multiple_paths(g: &mut Graph) -> GraphProptestResult {
     let status = g.solve();
-    prop_assert_matches!(status, SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal);
+    prop_assert_matches!(
+      status,
+      SolveStatus::Infeasible(InfKind::Path) | SolveStatus::Optimal
+    );
     prop_assume!(matches!(status, SolveStatus::Infeasible(InfKind::Path)));
     let iis = g.compute_iis(true);
     prop_assert!(iis.edge_nodes.len() < g.nodes.len());
@@ -239,8 +255,6 @@ mod tests {
     Ok(())
   }
 
-
-
   #[graph_test]
   #[input("multiple-sccs-0.pi", path_iis(vec![0, 3, 4, 5]))]
   #[input("multiple-sccs-1.pi", path_iis(vec![0, 1, 2, 6, 4, 5]))]
@@ -251,9 +265,10 @@ mod tests {
         graph_testcase_assert_eq!(true_iis.bounds, iis.bounds);
         graph_testcase_assert_eq!(true_iis.edge_nodes, iis.edge_nodes);
       }
-      status => {
-        Err(anyhow::anyhow!("should be path infeasible, was {:?}", status))?
-      }
+      status => Err(anyhow::anyhow!(
+        "should be path infeasible, was {:?}",
+        status
+      ))?,
     };
     Ok(())
   }

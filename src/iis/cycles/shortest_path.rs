@@ -1,13 +1,15 @@
 use super::*;
+use crate::edge_storage::{BackwardDir, EdgeDir, ForwardDir};
 use crate::iis::Iis;
-use crate::edge_storage::{ForwardDir, BackwardDir, EdgeDir};
 
 pub enum ShortestPathAlg {}
 
 impl<E: EdgeLookup> FindCyclicIis<ShortestPathAlg> for Graph<E> {
   fn find_cyclic_iis(&self, sccs: &[FnvHashSet<usize>]) -> Iis {
-    for scc in sccs { // start from first SCC index found in ModelState
-      let iis = self.find_cycle_edge_iis(scc, false, None)
+    for scc in sccs {
+      // start from first SCC index found in ModelState
+      let iis = self
+        .find_cycle_edge_iis(scc, false, None)
         .or_else(|| self.find_cycle_bound_iis(scc));
       if let Some(iis) = iis {
         return iis;
@@ -57,7 +59,7 @@ impl Prune {
     use Prune::*;
     match self {
       BestDestLessThan(bnd) | AllDestLessThan(bnd) => Some(*bnd),
-      AllDest | BestDest => None
+      AllDest | BestDest => None,
     }
   }
 
@@ -75,15 +77,27 @@ impl Prune {
 #[derive(Debug, Copy, Clone)]
 enum Label {
   // The source node
-  Src { node: usize },
+  Src {
+    node: usize,
+  },
   // Sentinel for values which have not been processed, but are already in the queue.
   Queued,
   // Regular node
-  Node { dist_from_src: u32, node: usize, pred: usize },
+  Node {
+    dist_from_src: u32,
+    node: usize,
+    pred: usize,
+  },
   // Sentinel for destination which has never been visited
-  DestUnvisited { node: usize },
+  DestUnvisited {
+    node: usize,
+  },
   // Destination node
-  Dest { dist_from_src: u32, node: usize, pred: usize },
+  Dest {
+    dist_from_src: u32,
+    node: usize,
+    pred: usize,
+  },
 }
 
 impl Label {
@@ -93,8 +107,7 @@ impl Label {
       Label::Src { node }
       | Label::Node { node, .. }
       | Label::DestUnvisited { node }
-      | Label::Dest { node, .. }
-      => node
+      | Label::Dest { node, .. } => node,
     }
   }
 
@@ -102,9 +115,17 @@ impl Label {
     use Label::*;
     match self {
       Src { node } => format!("S({})", node),
-      Node { node, dist_from_src, pred } => format!("N({} <- {}; d={})", node, pred, dist_from_src),
+      Node {
+        node,
+        dist_from_src,
+        pred,
+      } => format!("N({} <- {}; d={})", node, pred, dist_from_src),
       Queued => "Q".to_string(),
-      Dest { node, dist_from_src, pred } => format!("D({} <- {}; d={})", node, pred, dist_from_src),
+      Dest {
+        node,
+        dist_from_src,
+        pred,
+      } => format!("D({} <- {}; d={})", node, pred, dist_from_src),
       DestUnvisited { node } => format!("U({})", node),
     }
   }
@@ -128,11 +149,12 @@ impl<D> ShortestPaths<D> {
   fn dest_label(&self, dest: usize) -> Label {
     use Label::*;
     match self.labels.get(&dest) {
-      None | Some(DestUnvisited { .. }) => panic!("BFS terminated before finding path to node {}", dest),
+      None | Some(DestUnvisited { .. }) => {
+        panic!("BFS terminated before finding path to node {}", dest)
+      }
       Some(Queued) => unreachable!("should never reach a node"),
-      Some(Node { .. })
-      | Some(Src { .. }) => panic!("Node {} is not a destination node", dest),
-      Some(l @ Dest { .. }) => *l
+      Some(Node { .. }) | Some(Src { .. }) => panic!("Node {} is not a destination node", dest),
+      Some(l @ Dest { .. }) => *l,
     }
   }
 
@@ -141,7 +163,7 @@ impl<D> ShortestPaths<D> {
   pub fn num_edges(&self, dest: usize) -> usize {
     match self.dest_label(dest) {
       Label::Dest { dist_from_src, .. } => dist_from_src as usize,
-      _ => unreachable!()
+      _ => unreachable!(),
     }
   }
 
@@ -150,7 +172,10 @@ impl<D> ShortestPaths<D> {
   /// If the edge direction is backward, the nodes are iterated in normal order
   /// (source node first).
   pub fn iter_nodes(&self, dest: usize) -> ShortestPath<D> {
-    ShortestPath { path: self, label: Some(self.dest_label(dest)) }
+    ShortestPath {
+      path: self,
+      label: Some(self.dest_label(dest)),
+    }
   }
 }
 //
@@ -183,11 +208,9 @@ impl<D> Iterator for ShortestPath<'_, D> {
           self.label = Some(self.path.labels[&pred]);
           Some(node)
         }
-        Src { node } => {
-          Some(node)
-        }
-      }
-      None => None
+        Src { node } => Some(node),
+      },
+      None => None,
     }
   }
 
@@ -199,7 +222,7 @@ impl<D> Iterator for ShortestPath<'_, D> {
         DestUnvisited { .. } | Queued => unreachable!(),
         Dest { dist_from_src, .. } | Node { dist_from_src, .. } => dist_from_src as usize + 1,
         Src { .. } => 1,
-      }
+      },
       None => 0,
     };
     (sz, Some(sz))
@@ -207,7 +230,6 @@ impl<D> Iterator for ShortestPath<'_, D> {
 }
 
 impl<D> ExactSizeIterator for ShortestPath<'_, D> {}
-
 
 impl<E: EdgeLookup> Graph<E> {
   /// Computes the shortest path from `src` to one or more `dests`.
@@ -221,18 +243,18 @@ impl<E: EdgeLookup> Graph<E> {
   ///   - `dests` are the destination nodes.
   ///   - `prune` describes when to terminate the search.
   ///
-  fn shortest_path_scc<D, I>(&self,
-                             scc: &FnvHashSet<usize>,
-                             src: usize,
-                             dests: I,
-                             prune: Prune,
+  fn shortest_path_scc<D, I>(
+    &self,
+    scc: &FnvHashSet<usize>,
+    src: usize,
+    dests: I,
+    prune: Prune,
   ) -> Option<ShortestPaths<D>>
-    where
-      D: EdgeDir,
-      I: IntoIterator<Item=usize>,
-      E: crate::edge_storage::Neighbours<D>,
+  where
+    D: EdgeDir,
+    I: IntoIterator<Item = usize>,
+    E: crate::edge_storage::Neighbours<D>,
   {
-
     use Label::*;
 
     let mut labels = map_with_capacity(scc.len());
@@ -242,7 +264,9 @@ impl<E: EdgeLookup> Graph<E> {
     }
 
     let n_dests = labels.len();
-    if n_dests == 0 { return None; }
+    if n_dests == 0 {
+      return None;
+    }
     let mut n_dests_found = 0;
     let mut queue = VecDeque::with_capacity(scc.len());
 
@@ -251,8 +275,16 @@ impl<E: EdgeLookup> Graph<E> {
     'bfs: while let Some(v_label) = queue.pop_front() {
       let (v, new_dist_from_src) = match v_label {
         Src { node } => (node, 1),
-        Dest { dist_from_src, node, .. } => (node, dist_from_src + 1),
-        Node { dist_from_src, node, .. } => (node, dist_from_src + 1),
+        Dest {
+          dist_from_src,
+          node,
+          ..
+        } => (node, dist_from_src + 1),
+        Node {
+          dist_from_src,
+          node,
+          ..
+        } => (node, dist_from_src + 1),
         DestUnvisited { .. } | Queued => unreachable!(),
       };
 
@@ -265,7 +297,11 @@ impl<E: EdgeLookup> Graph<E> {
       for w in EdgeLookup::neighbour_nodes::<D>(&self.edges, v).filter(|w| scc.contains(w)) {
         match labels.get_mut(&w) {
           Some(dest_label @ DestUnvisited { .. }) => {
-            *dest_label = Dest { dist_from_src: new_dist_from_src, node: w, pred: v };
+            *dest_label = Dest {
+              dist_from_src: new_dist_from_src,
+              node: w,
+              pred: v,
+            };
             n_dests_found += 1;
             if !prune.all_dests() || n_dests_found == n_dests {
               labels.insert(v, v_label);
@@ -276,7 +312,11 @@ impl<E: EdgeLookup> Graph<E> {
           }
           None => {
             labels.insert(w, Queued);
-            queue.push_back(Node { dist_from_src: new_dist_from_src, node: w, pred: v });
+            queue.push_back(Node {
+              dist_from_src: new_dist_from_src,
+              node: w,
+              pred: v,
+            });
           }
           Some(_) => {}
         }
@@ -291,10 +331,14 @@ impl<E: EdgeLookup> Graph<E> {
     }
   }
 
-
   /// Try to find an IIS which consists only of edge-constraints (constraints `t[i] + d[i,j] <= t[j]`)
   /// Returns `None` if no such IIS exists in the SCC.
-  fn find_cycle_edge_iis(&self, scc: &FnvHashSet<usize>, smallest: bool, prune: Option<u32>) -> Option<Iis> {
+  fn find_cycle_edge_iis(
+    &self,
+    scc: &FnvHashSet<usize>,
+    smallest: bool,
+    prune: Option<u32>,
+  ) -> Option<Iis> {
     let mut smallest_iis = None;
     let mut path_prune = match (smallest, prune) {
       (false, _) => Prune::BestDest,
@@ -305,12 +349,8 @@ impl<E: EdgeLookup> Graph<E> {
     for &n in scc {
       for e in self.edges.successors(n) {
         if e.weight > 0 && scc.contains(&e.to) {
-          let p = self.shortest_path_scc::<ForwardDir, _>(
-            scc,
-            e.to,
-            std::iter::once(e.from),
-            path_prune,
-          );
+          let p =
+            self.shortest_path_scc::<ForwardDir, _>(scc, e.to, std::iter::once(e.from), path_prune);
 
           if let Some(p) = p {
             let num_path_edges = p.num_edges(e.from);
@@ -328,25 +368,35 @@ impl<E: EdgeLookup> Graph<E> {
 
   /// Try to find an IIS which consists an Upper bound, Lower bound and edge-constraints (constraints `t[i] + d[i,j] <= t[j]`)
   fn find_cycle_bound_iis(&self, scc: &FnvHashSet<usize>) -> Option<Iis> {
-    self.find_scc_bound_infeas(scc.iter().copied(), false).map(|bi| {
-      let src = bi.lb_node;
-      let dest = bi.ub_node;
+    self
+      .find_scc_bound_infeas(scc.iter().copied(), false)
+      .map(|bi| {
+        let src = bi.lb_node;
+        let dest = bi.ub_node;
 
-      let p1 = self.shortest_path_scc::<ForwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
-      let p2 = self.shortest_path_scc::<BackwardDir, _>(scc, src, once(dest), Prune::BestDest).unwrap();
+        let p1 = self
+          .shortest_path_scc::<ForwardDir, _>(scc, src, once(dest), Prune::BestDest)
+          .unwrap();
+        let p2 = self
+          .shortest_path_scc::<BackwardDir, _>(scc, src, once(dest), Prune::BestDest)
+          .unwrap();
 
-      let n_edges = p1.num_edges(dest) + p2.num_edges(dest);
+        let n_edges = p1.num_edges(dest) + p2.num_edges(dest);
 
-      let mut iis = Iis::from_cycle_path_pair(self, p1.iter_nodes(dest), p2.iter_nodes(dest));
-      debug_assert_eq!(iis.len(), n_edges + 2);
-      iis
-    })
+        let mut iis = Iis::from_cycle_path_pair(self, p1.iter_nodes(dest), p2.iter_nodes(dest));
+        debug_assert_eq!(iis.len(), n_edges + 2);
+        iis
+      })
   }
 
   /// Try to find the *smallest* IIS which consists an Upper bound, Lower bound and edge-constraints (constraints `t[i] + d[i,j] <= t[j]`)
   /// If `prune` is `Some(k)`, only looks for IIS strictly smaller than `k`
   /// Returns `None` if no such IIS exists in the SCC.
-  fn find_smallest_cycle_bound_iis(&self, scc: &FnvHashSet<usize>, prune: Option<u32>) -> Option<Iis> {
+  fn find_smallest_cycle_bound_iis(
+    &self,
+    scc: &FnvHashSet<usize>,
+    prune: Option<u32>,
+  ) -> Option<Iis> {
     let mut best_iis = None;
     let mut global_path_prune = match prune {
       None => Prune::BestDest,
@@ -356,23 +406,33 @@ impl<E: EdgeLookup> Graph<E> {
 
     let max_lb_node = *scc.iter().max_by_key(|n| self.nodes[**n].lb).unwrap();
     let min_ub = scc.iter().map(|n| self.nodes[*n].ub).min().unwrap();
-    let src_nodes = std::iter::once(max_lb_node)
-      .chain(scc.iter().copied().filter(|n| n != &max_lb_node));
+    let src_nodes =
+      std::iter::once(max_lb_node).chain(scc.iter().copied().filter(|n| n != &max_lb_node));
 
     for src in src_nodes {
       let lb = self.nodes[src].lb;
-      if lb <= min_ub { continue; }
+      if lb <= min_ub {
+        continue;
+      }
       dests.extend(scc.iter().copied().filter(|&n| self.nodes[n].ub < lb));
 
-      let paths_there = self.shortest_path_scc::<ForwardDir, _>(scc, src, dests.iter().copied(), global_path_prune);
+      let paths_there =
+        self.shortest_path_scc::<ForwardDir, _>(scc, src, dests.iter().copied(), global_path_prune);
 
       if let Some(paths_there) = paths_there {
-        let min_path_there_len = dests.iter().map(|&dst| paths_there.num_edges(dst)).min().unwrap();
+        let min_path_there_len = dests
+          .iter()
+          .map(|&dst| paths_there.num_edges(dst))
+          .min()
+          .unwrap();
         let mut path_prune = global_path_prune;
         path_prune.update_bound(|n| n - min_path_there_len as u32);
-        let paths_back = self.shortest_path_scc::<BackwardDir, _>(scc, src, dests.iter().copied(), path_prune);
+        let paths_back =
+          self.shortest_path_scc::<BackwardDir, _>(scc, src, dests.iter().copied(), path_prune);
         if let Some(paths_back) = paths_back {
-          let best_dest = dests.iter().copied()
+          let best_dest = dests
+            .iter()
+            .copied()
             .min_by_key(|&dst| paths_there.num_edges(dst) + paths_back.num_edges(dst))
             .unwrap();
 
@@ -398,15 +458,17 @@ impl<E: EdgeLookup> Graph<E> {
 mod tests {
   #[macro_use]
   use crate::*;
-  use crate::test::{*, strategy::{graph_with_conn, default_nodes, set_arbitrary_edge_to_one}};
-  use proptest::prelude::*;
-  use crate::graph::{Graph};
+  use crate::graph::Graph;
   use crate::iis::cycles::{FindCyclicIis, ShortestPathAlg};
+  use crate::test::{
+    strategy::{default_nodes, graph_with_conn, set_arbitrary_edge_to_one},
+    *,
+  };
+  use proptest::prelude::*;
 
   /// Triangular graphs with a single non-zero edge
-  fn cei_triangular_graph() -> impl SharableStrategy<Value=GraphData> {
-    (3..200usize)
-      .prop_flat_map(|mut size| {
+  fn cei_triangular_graph() -> impl SharableStrategy<Value = GraphData> {
+    (3..200usize).prop_flat_map(|mut size| {
       // ensure the graph has enough nodes that the last row (highest rank) doesn't
       // have any lonely nodes (otherwise we don't have a SCC graph)
       let last_node = size - 1;
@@ -419,12 +481,23 @@ mod tests {
   }
 
   /// Triangular graphs with a zero edges and a bound infeasible (LB is the top of the triangle, UB is the bottom-right)
-  fn cbi_triangular_graph() -> impl SharableStrategy<Value=GraphData> {
+  fn cbi_triangular_graph() -> impl SharableStrategy<Value = GraphData> {
     (1..=13usize)
       .prop_flat_map(|mut rank| {
-      let size = triangular_number(rank) + 1;
-      graph_with_conn(prop::collection::vec(Just(NodeData { lb: 0, ub: 4, obj: 0 }), size), Triangular(), Just(0))
-    })
+        let size = triangular_number(rank) + 1;
+        graph_with_conn(
+          prop::collection::vec(
+            Just(NodeData {
+              lb: 0,
+              ub: 4,
+              obj: 0,
+            }),
+            size,
+          ),
+          Triangular(),
+          Just(0),
+        )
+      })
       .prop_map(|mut g| {
         g.nodes.last_mut().unwrap().lb = 2;
         g.nodes.first_mut().unwrap().ub = 1;
@@ -433,22 +506,28 @@ mod tests {
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(cei_triangular_graph())]
   fn cei_triangular_graph_iis_size(g: &mut Graph) -> GraphProptestResult {
     g.solve();
     let (sccs, first_inf_scc) = match &g.state {
-      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+      ModelState::InfCycle {
+        sccs,
+        first_inf_scc,
+      } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other),
     };
     prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
-    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(
+      g,
+      &sccs[first_inf_scc..],
+    );
     prop_assert_eq!(iis.len(), 3);
     Ok(())
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(cbi_triangular_graph())]
   fn cbi_triangular_graph_iis_size(g: &mut Graph) -> GraphProptestResult {
     let t = std::time::Instant::now();
@@ -457,38 +536,52 @@ mod tests {
     g.solve();
     // println!("solve time = {}s", t.elapsed().as_millis() as f64 / 1000.);
     let (sccs, first_inf_scc) = match &g.state {
-      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+      ModelState::InfCycle {
+        sccs,
+        first_inf_scc,
+      } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other),
     };
     let t = std::time::Instant::now();
     prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
-    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(
+      g,
+      &sccs[first_inf_scc..],
+    );
     prop_assert_eq!(iis.len(), iis_size);
     // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
-    let no_iis = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
+    let no_iis =
+      Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32));
     prop_assert_eq!(no_iis, None);
-    let iis2 = Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
+    let iis2 =
+      Graph::find_smallest_cycle_bound_iis(g, &sccs[first_inf_scc], Some(iis_size as u32 + 1));
     match iis2 {
       Some(iis2) => prop_assert_eq!(iis2.len(), iis.len()),
-      None => test_case_bail!("no iis found")
+      None => test_case_bail!("no iis found"),
     }
 
     Ok(())
   }
 
   #[graph_proptest]
-  #[config(layout="fdp")]
+  #[config(layout = "fdp")]
   #[input(cbi_triangular_graph().prop_map(|mut g| { g.edges.values_mut().for_each(|w| *w = 1); g }))]
   fn multi_cycle_inf_triangular_graph(g: &mut Graph) -> GraphProptestResult {
     g.solve();
     let (sccs, first_inf_scc) = match &g.state {
-      ModelState::InfCycle { sccs, first_inf_scc } => (&sccs[..], *first_inf_scc),
-      other => test_case_bail!("should find infeasible cycle, found: {:?}", other)
+      ModelState::InfCycle {
+        sccs,
+        first_inf_scc,
+      } => (&sccs[..], *first_inf_scc),
+      other => test_case_bail!("should find infeasible cycle, found: {:?}", other),
     };
     prop_assert_eq!(sccs.len(), 1, "graph is strongly connected");
 
     let t = std::time::Instant::now();
-    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(g, &sccs[first_inf_scc..]);
+    let iis = <Graph as FindCyclicIis<ShortestPathAlg>>::find_smallest_cyclic_iis(
+      g,
+      &sccs[first_inf_scc..],
+    );
     prop_assert_eq!(iis.len(), 3);
     // println!("iis time = {}s", t.elapsed().as_millis() as f64 / 1000.);
     Ok(())
